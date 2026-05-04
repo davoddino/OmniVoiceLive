@@ -175,15 +175,15 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=female, low pitch
-LIVE_TTS_VOICE_MODE=voice_design
-LIVE_TTS_NUM_STEP_FIRST=16
-LIVE_TTS_NUM_STEP_NEXT=24
+LIVE_TTS_VOICE_MODE=session_anchor
+LIVE_TTS_NUM_STEP_FIRST=20
+LIVE_TTS_NUM_STEP_NEXT=28
 LIVE_TTS_SPEED=1.05
-LIVE_TTS_SELF_CONDITION=false
+LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
-LIVE_TTS_SESSION_VOICE_ANCHOR=false
-LIVE_TTS_STARTUP_VOICE_ANCHOR=false
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
+LIVE_TTS_SESSION_VOICE_ANCHOR=true
+LIVE_TTS_STARTUP_VOICE_ANCHOR=true
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Parlo in italiano con un tono naturale, chiaro e rilassato. Ti ascolto con attenzione e rispondo in modo semplice, concreto e professionale.
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
@@ -194,6 +194,7 @@ LIVE_TTS_WHISPER_COMPUTE_TYPE=int8_float16
 LIVE_TTS_LLM_BACKEND=openai
 LIVE_TTS_LLM_URL=http://192.168.0.20:8001/v1/chat/completions
 LIVE_TTS_LLM_MODEL=qwen3.6-35b
+LIVE_TTS_LLM_TEMPERATURE=0.2
 
 LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
 LIVE_TTS_CLIENT_BARGE_STOP_MS=20
@@ -229,27 +230,28 @@ Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 
 ## Stabilita' Del Timbro
 
-La modalita' predefinita e' `voice_design`: usa OmniVoice come `test.py`, cioe'
-`model.generate(..., instruct="female, low pitch", language="it")`, senza
-reference audio e senza `voice_clone_prompt`.
+La modalita' predefinita e' `session_anchor`. All'avvio il server genera una
+reference sintetica con OmniVoice, usando `instruct="female, low pitch"` come in
+`test.py`. Quella reference viene usata come blocco vocale per tutti i chunk della
+chiamata.
 
-Questa e' la scelta migliore quando la voce voice-design del modello e' gia'
-piacevole in italiano. Evita la pipeline di cloning e mantiene il comportamento
-piu' vicino al test funzionante.
+Non richiede una voce esterna o una persona reale: l'ancora nasce dalla stessa
+voce voice-design del modello. Serve solo a evitare che ogni chunk venga
+campionato con un timbro diverso.
 
 Variabili:
 
 ```text
-LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_VOICE_MODE=session_anchor
 LIVE_TTS_INSTRUCT=female, low pitch
-LIVE_TTS_SELF_CONDITION=false
-LIVE_TTS_SESSION_VOICE_ANCHOR=false
-LIVE_TTS_STARTUP_VOICE_ANCHOR=false
+LIVE_TTS_SELF_CONDITION=true
+LIVE_TTS_SESSION_VOICE_ANCHOR=true
+LIVE_TTS_STARTUP_VOICE_ANCHOR=true
 ```
 
-Se in futuro vuoi tornare alla stabilizzazione tramite audio sintetico generato
-dal modello, puoi impostare `LIVE_TTS_VOICE_MODE=turn_anchor` o
-`LIVE_TTS_VOICE_MODE=session_anchor`. Di default resta disattivata.
+Se vuoi tornare alla modalita' pura di `test.py`, senza nessun blocco vocale,
+imposta `LIVE_TTS_VOICE_MODE=voice_design`, ma la differenza tra chunk tende ad
+aumentare.
 
 ## Barge-In Locale
 

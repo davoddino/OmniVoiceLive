@@ -9,9 +9,13 @@ DEFAULT_SYSTEM_PROMPT = """
 Sei un assistente vocale call-center per CavadaLabs.
 Rispondi sempre in italiano naturale e parlato.
 Usa frasi brevi, concrete e facili da ascoltare.
+Mantieni il contesto della conversazione e non ripetere il saluto iniziale.
+Non ripresentarti a ogni messaggio: dopo il primo turno rispondi direttamente.
+Se la trascrizione contiene piccoli errori, interpreta l'intento piu' probabile.
+Se l'utente chiede cosa sai fare, spiega in modo naturale come puoi aiutarlo.
 Non usare markdown, elenchi, titoli, asterischi o codice.
 Quando non hai abbastanza informazioni, fai una domanda breve.
-Non superare 100 parole salvo necessita' reale.
+Non superare 70 parole salvo necessita' reale.
 
 CavadaLabs aiuta le aziende italiane a integrare intelligenza artificiale,
 OCR, trascrizioni, knowledge management, server GPU, CRM, ERP e database.
@@ -26,6 +30,7 @@ def load_env_files() -> None:
     if _ENV_FILES_LOADED:
         return
     _ENV_FILES_LOADED = True
+    protected_keys = set(os.environ)
 
     explicit = os.getenv("LIVE_TTS_ENV_FILE")
     if explicit:
@@ -33,10 +38,10 @@ def load_env_files() -> None:
     else:
         repo_root = Path(__file__).resolve().parents[1]
         candidates = [
-            Path.cwd() / ".env",
+            repo_root / "live_tts.env",
             Path.cwd() / "live_tts.env",
             repo_root / ".env",
-            repo_root / "live_tts.env",
+            Path.cwd() / ".env",
         ]
 
     seen: set[Path] = set()
@@ -45,10 +50,10 @@ def load_env_files() -> None:
         if resolved in seen:
             continue
         seen.add(resolved)
-        _load_env_file(resolved)
+        _load_env_file(resolved, protected_keys)
 
 
-def _load_env_file(path: Path) -> None:
+def _load_env_file(path: Path, protected_keys: set[str]) -> None:
     if not path.is_file():
         return
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -63,7 +68,8 @@ def _load_env_file(path: Path) -> None:
         key = key.strip()
         if not key or not key.replace("_", "").isalnum():
             continue
-        os.environ.setdefault(key, _parse_env_value(value))
+        if key not in protected_keys:
+            os.environ[key] = _parse_env_value(value)
 
 
 def _parse_env_value(value: str) -> str:
@@ -168,24 +174,28 @@ class LiveTTSConfig:
             tts_dtype=_env("LIVE_TTS_DTYPE", "float16"),
             tts_language=_env("LIVE_TTS_LANGUAGE", "it"),
             tts_instruct=_env("LIVE_TTS_INSTRUCT", "female, low pitch"),
-            tts_voice_mode=_env("LIVE_TTS_VOICE_MODE", "voice_design"),
-            tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 16),
-            tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 24),
+            tts_voice_mode=_env("LIVE_TTS_VOICE_MODE", "session_anchor"),
+            tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 20),
+            tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 28),
             tts_speed=_env_float("LIVE_TTS_SPEED", 1.05),
             tts_frame_ms=_env_int("LIVE_TTS_FRAME_MS", 40),
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
-            tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", False),
+            tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
             tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 0.45),
             tts_session_voice_anchor=_env_bool(
-                "LIVE_TTS_SESSION_VOICE_ANCHOR", False
+                "LIVE_TTS_SESSION_VOICE_ANCHOR", True
             ),
             tts_startup_voice_anchor=_env_bool(
-                "LIVE_TTS_STARTUP_VOICE_ANCHOR", False
+                "LIVE_TTS_STARTUP_VOICE_ANCHOR", True
             ),
             tts_startup_anchor_text=_env(
                 "LIVE_TTS_STARTUP_ANCHOR_TEXT",
-                "Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.",
+                (
+                    "Buongiorno, sono pronta ad aiutarti. Parlo in italiano con "
+                    "un tono naturale, chiaro e rilassato. Ti ascolto con attenzione "
+                    "e rispondo in modo semplice, concreto e professionale."
+                ),
             ),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
             stt_url=_env("LIVE_TTS_STT_URL", ""),
@@ -201,7 +211,7 @@ class LiveTTSConfig:
                 "http://192.168.0.20:8001/v1/chat/completions",
             ),
             llm_model=_env("LIVE_TTS_LLM_MODEL", "qwen3.6-35b"),
-            llm_temperature=_env_float("LIVE_TTS_LLM_TEMPERATURE", 0.0),
+            llm_temperature=_env_float("LIVE_TTS_LLM_TEMPERATURE", 0.2),
             llm_top_p=_env_float("LIVE_TTS_LLM_TOP_P", 1.0),
             llm_timeout_s=_env_float("LIVE_TTS_LLM_TIMEOUT_S", 120.0),
             system_prompt=_env("LIVE_TTS_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),

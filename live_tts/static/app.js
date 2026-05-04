@@ -62,7 +62,7 @@ async function startCall() {
     transportLabel.textContent =
       location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
     connectionLabel.textContent = "Avvio";
-    voiceModeLabel.textContent = "Voice design OmniVoice";
+    voiceModeLabel.textContent = "Voce OmniVoice stabile";
 
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) {

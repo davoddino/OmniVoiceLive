@@ -233,10 +233,14 @@ class RealtimeSession:
                 await self.send_event("turn.empty", turn_id=turn_id)
                 return
 
-            self.history.append({"role": "user", "content": user_text})
-            assistant_text = await self._respond(runtime, user_text)
-            if assistant_text:
-                self.history.append({"role": "assistant", "content": assistant_text})
+            history_before_turn = list(self.history)
+            assistant_text = await self._respond(runtime, user_text, history_before_turn)
+            if not runtime.cancel.is_set():
+                self.history.append({"role": "user", "content": user_text})
+                if assistant_text:
+                    self.history.append(
+                        {"role": "assistant", "content": assistant_text}
+                    )
                 self.history = self.history[-12:]
 
             if not runtime.cancel.is_set():
@@ -267,7 +271,12 @@ class RealtimeSession:
             if self.current is runtime:
                 self.current = None
 
-    async def _respond(self, runtime: TurnRuntime, user_text: str) -> str:
+    async def _respond(
+        self,
+        runtime: TurnRuntime,
+        user_text: str,
+        history: list[dict[str, str]],
+    ) -> str:
         turn_id = runtime.turn_id
         segment_queue: asyncio.Queue[str | None] = asyncio.Queue()
         full_text: list[str] = []
@@ -276,7 +285,7 @@ class RealtimeSession:
             segmenter = LiveTextSegmenter()
             try:
                 await self.send_event("assistant.thinking", turn_id=turn_id)
-                async for piece in self.llm.stream(user_text, self.history, runtime.cancel):
+                async for piece in self.llm.stream(user_text, history, runtime.cancel):
                     if runtime.cancel.is_set() or self.current is not runtime:
                         break
                     full_text.append(piece)

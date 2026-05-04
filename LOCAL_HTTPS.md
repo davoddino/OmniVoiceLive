@@ -162,8 +162,9 @@ curl http://127.0.0.1:8000/health
 
 `live_tts` carica automaticamente `.env` o `live_tts.env` dalla root della repo.
 In questa repo c'e' gia' `live_tts.env` con la configurazione Ubuntu locale:
-OmniVoice in modalita' `voice_design`, voce `female, low pitch`, HTTPS locale,
-Whisper HTTP e LLM OpenAI-compatible.
+OmniVoice in modalita' `session_anchor`, voce base `female, low pitch`, HTTPS
+locale, Whisper HTTP e LLM OpenAI-compatible.
+Se esiste anche `.env`, viene usato come override locale.
 
 In un secondo terminale avvii solo:
 

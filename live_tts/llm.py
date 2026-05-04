@@ -70,7 +70,7 @@ class LLMStreamer:
                     "top_p": self.config.llm_top_p,
                     "messages": [
                         {"role": "system", "content": self.config.system_prompt},
-                        *history[-8:],
+                        *history[-10:],
                         {"role": "user", "content": prompt},
                     ],
                 }
