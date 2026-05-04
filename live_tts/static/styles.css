@@ -117,6 +117,35 @@ p {
   gap: 8px;
 }
 
+.languageControl {
+  display: grid;
+  gap: 5px;
+  min-width: 136px;
+}
+
+.languageControl span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.languageControl select {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 34px 0 11px;
+  font: inherit;
+  font-weight: 650;
+}
+
+.languageControl select:disabled {
+  color: #98a2b3;
+  background: #f7f9fc;
+}
+
 .statusBadge,
 .timer,
 .connectionPill {
@@ -368,6 +397,10 @@ p {
 
   .callMeta {
     justify-content: space-between;
+    width: 100%;
+  }
+
+  .languageControl {
     width: 100%;
   }
 

@@ -1,5 +1,5 @@
 import tempfile
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from faster_whisper import WhisperModel
 
 app = FastAPI(title="cavadatts-stt")
@@ -15,8 +15,11 @@ def health():
     return {"ok": True, "engine": "faster-whisper", "model": "small"}
 
 @app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
+async def transcribe(file: UploadFile = File(...), language: str = Form("it")):
     suffix = ".wav"
+    language = (language or "it").strip().lower()
+    if language == "auto":
+        language = None
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
         tmp.write(await file.read())
@@ -24,7 +27,7 @@ async def transcribe(file: UploadFile = File(...)):
 
         segments, info = model.transcribe(
             tmp.name,
-            language="it",
+            language=language,
             vad_filter=True,
             beam_size=1,
             temperature=0.0,

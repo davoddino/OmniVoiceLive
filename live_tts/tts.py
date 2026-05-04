@@ -40,6 +40,7 @@ class BaseTTS(ABC):
         text: str,
         first: bool,
         state: TTSTurnState | None = None,
+        language: str | None = None,
     ) -> np.ndarray:
         raise NotImplementedError
 
@@ -52,6 +53,7 @@ class MockTTS(BaseTTS):
         text: str,
         first: bool,
         state: TTSTurnState | None = None,
+        language: str | None = None,
     ) -> np.ndarray:
         duration = min(3.2, max(0.45, len(text) / 38.0))
         samples = int(self.sample_rate * duration)
@@ -126,8 +128,15 @@ class OmniVoiceTTS(BaseTTS):
         text: str,
         first: bool,
         state: TTSTurnState | None = None,
+        language: str | None = None,
     ) -> np.ndarray:
-        return await asyncio.to_thread(self._synthesize_sync, text, first, state)
+        return await asyncio.to_thread(
+            self._synthesize_sync,
+            text,
+            first,
+            state,
+            language,
+        )
 
     def _load_model(self) -> None:
         if self.model is not None:
@@ -159,6 +168,7 @@ class OmniVoiceTTS(BaseTTS):
         text: str,
         first: bool,
         state: TTSTurnState | None,
+        language: str | None,
     ) -> np.ndarray:
         if self.model is None:
             self._load_model()
@@ -176,7 +186,7 @@ class OmniVoiceTTS(BaseTTS):
         with self._lock:
             kwargs = {
                 "text": text,
-                "language": self.config.tts_language,
+                "language": language or self.config.tts_language,
                 "num_step": num_step,
                 "speed": self.config.tts_speed,
                 "guidance_scale": self.config.tts_guidance_scale,

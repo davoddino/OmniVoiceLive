@@ -30,6 +30,15 @@ from live_tts.tts import BaseTTS, TTSTurnState
 logger = logging.getLogger(__name__)
 
 
+SUPPORTED_LANGUAGES = {
+    "it": "Italiano",
+    "en": "English",
+    "es": "Español",
+    "fr": "Français",
+    "de": "Deutsch",
+}
+
+
 @dataclass
 class TurnRuntime:
     turn_id: int
@@ -63,6 +72,7 @@ class RealtimeSession:
             max_turn_s=config.vad_max_turn_s,
         )
         self.history: list[dict[str, str]] = []
+        self.language = self._normalize_language(config.tts_language)
         self.turn_counter = 0
         self.current: TurnRuntime | None = None
         self.tts_session_state: TTSTurnState | None = (
@@ -86,6 +96,8 @@ class RealtimeSession:
             session_id=self.session_id,
             tts_sample_rate=self.tts.sample_rate,
             tts_frame_ms=self.config.tts_frame_ms,
+            language=self.language,
+            languages=SUPPORTED_LANGUAGES,
             client_barge_threshold=self.config.client_barge_threshold,
             client_barge_stop_ms=self.config.client_barge_stop_ms,
             client_barge_commit_ms=self.config.client_barge_commit_ms,
@@ -118,13 +130,20 @@ class RealtimeSession:
         msg_type = data.get("type")
         if msg_type == "session.start":
             sample_rate = int(data.get("sample_rate") or 48000)
+            self.language = self._normalize_language(data.get("language"))
             self.detector.set_sample_rate(sample_rate)
             logger.info(
-                "session started session_id=%s sample_rate=%s",
+                "session started session_id=%s sample_rate=%s language=%s",
                 self.session_id,
                 sample_rate,
+                self.language,
             )
-            await self.send_event("session.started", sample_rate=sample_rate)
+            await self.send_event(
+                "session.started",
+                sample_rate=sample_rate,
+                language=self.language,
+                language_label=SUPPORTED_LANGUAGES[self.language],
+            )
         elif msg_type == "barge_in":
             logger.info(
                 "barge_in received session_id=%s active_turn_id=%s",
@@ -208,7 +227,11 @@ class RealtimeSession:
             wav_bytes = float32_to_wav_bytes(clean_samples, sample_rate)
 
             stt_started = time.monotonic()
-            stt_result = await self.stt.transcribe(wav_bytes, runtime.cancel)
+            stt_result = await self.stt.transcribe(
+                wav_bytes,
+                runtime.cancel,
+                language=self.language,
+            )
             if runtime.cancel.is_set():
                 return
 
@@ -226,6 +249,7 @@ class RealtimeSession:
                 turn_id=turn_id,
                 text=user_text,
                 language=stt_result.get("language"),
+                requested_language=self.language,
                 latency_ms=stt_latency_ms,
             )
             if not user_text:
@@ -290,7 +314,12 @@ class RealtimeSession:
             )
             try:
                 await self.send_event("assistant.thinking", turn_id=turn_id)
-                async for piece in self.llm.stream(user_text, history, runtime.cancel):
+                async for piece in self.llm.stream(
+                    user_text,
+                    history,
+                    runtime.cancel,
+                    language=self.language,
+                ):
                     if runtime.cancel.is_set() or self.current is not runtime:
                         break
                     full_text.append(piece)
@@ -351,6 +380,7 @@ class RealtimeSession:
                     segment,
                     first=first,
                     state=tts_state,
+                    language=self.language,
                 )
                 if runtime.cancel.is_set() or self.current is not runtime:
                     break
@@ -421,6 +451,10 @@ class RealtimeSession:
 
     def active_turn_id(self) -> int | None:
         return self.current.turn_id if self.current else None
+
+    def _normalize_language(self, value: object) -> str:
+        language = str(value or self.config.tts_language or "it").strip().lower()
+        return language if language in SUPPORTED_LANGUAGES else "it"
 
     async def send_event(self, event_type: str, **payload: Any) -> None:
         if self.closed:

@@ -192,6 +192,7 @@ LIVE_TTS_STARTUP_ANCHOR_TEXT=Parlo in italiano con voce maschile, calma, chiara 
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
+LIVE_TTS_STT_LANGUAGE=it
 LIVE_TTS_WHISPER_MODEL=small
 LIVE_TTS_WHISPER_DEVICE=cuda
 LIVE_TTS_WHISPER_COMPUTE_TYPE=int8_float16
@@ -212,6 +213,12 @@ LIVE_TTS_CLIENT_BARGE_STOP_MS=20
 LIVE_TTS_CLIENT_BARGE_COMMIT_MS=45
 LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=700
 ```
+
+La lingua della conversazione si sceglie dall'interfaccia prima di avviare la
+chiamata. Il browser invia `language` in `session.start`; il backend la usa per
+Whisper, per l'istruzione LLM e per OmniVoice. Se usi `whisper.py` come server
+HTTP, anche `/transcribe` accetta il campo form `language`, quindi non resta in
+auto-detect.
 
 Per testare solo trasporto audio e UI senza GPU:
 

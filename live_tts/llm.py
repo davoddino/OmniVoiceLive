@@ -19,6 +19,7 @@ class LLMStreamer:
         prompt: str,
         history: list[dict[str, str]],
         cancel_event: threading.Event,
+        language: str | None = None,
     ) -> AsyncIterator[str]:
         if self.config.llm_backend == "mock":
             async for piece in self._mock_stream(prompt, cancel_event):
@@ -28,7 +29,12 @@ class LLMStreamer:
         if not self.config.llm_url:
             raise RuntimeError("LIVE_TTS_LLM_URL is required when LLM backend is openai")
 
-        async for piece in self._openai_compatible_stream(prompt, history, cancel_event):
+        async for piece in self._openai_compatible_stream(
+            prompt,
+            history,
+            cancel_event,
+            language,
+        ):
             yield piece
 
     async def _mock_stream(
@@ -55,6 +61,7 @@ class LLMStreamer:
         prompt: str,
         history: list[dict[str, str]],
         cancel_event: threading.Event,
+        language: str | None,
     ) -> AsyncIterator[str]:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
@@ -70,6 +77,10 @@ class LLMStreamer:
                     "top_p": self.config.llm_top_p,
                     "messages": [
                         {"role": "system", "content": self.config.system_prompt},
+                        {
+                            "role": "system",
+                            "content": language_instruction(language),
+                        },
                         *history[-10:],
                         {"role": "user", "content": prompt},
                     ],
@@ -128,6 +139,22 @@ class LLMStreamer:
         if not text:
             return ""
         return clean_stream_text(text)
+
+
+def language_instruction(language: str | None) -> str:
+    names = {
+        "it": "Italian",
+        "en": "English",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+    }
+    code = (language or "it").strip().lower()
+    name = names.get(code, "Italian")
+    return (
+        f"Session language is fixed to {name}. "
+        f"Answer only in {name}. Do not auto-detect or switch language."
+    )
 
 
 def monotonic_ms() -> int:

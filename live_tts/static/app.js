@@ -13,6 +13,15 @@ const transportLabel = document.getElementById("transportLabel");
 const connectionLabel = document.getElementById("connectionLabel");
 const audioModeLabel = document.getElementById("audioModeLabel");
 const voiceModeLabel = document.getElementById("voiceModeLabel");
+const languageSelect = document.getElementById("languageSelect");
+
+const LANGUAGE_LABELS = {
+  it: "Italiano",
+  en: "English",
+  es: "Español",
+  fr: "Français",
+  de: "Deutsch",
+};
 
 let socket = null;
 let audioContext = null;
@@ -40,6 +49,7 @@ let socketOpenTimer = null;
 let cleaningUp = false;
 let callStartedAt = 0;
 let timerInterval = null;
+let sessionShortId = null;
 
 const clientVad = {
   threshold: 0.012,
@@ -59,6 +69,7 @@ async function startCall() {
     cleaningUp = false;
     setState("connecting", "Connessione");
     startButton.disabled = true;
+    languageSelect.disabled = true;
     transportLabel.textContent =
       location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
     connectionLabel.textContent = "Avvio";
@@ -168,6 +179,7 @@ function cleanup(label) {
   }
   socket = null;
   socketWasOpen = false;
+  sessionShortId = null;
   audioContext = null;
   mediaStream = null;
   recorderNode = null;
@@ -187,6 +199,7 @@ function cleanup(label) {
   resetClientVad();
   stopTimer();
   startButton.disabled = false;
+  languageSelect.disabled = false;
   stopButton.disabled = true;
   sessionLabel.textContent = label;
   connectionLabel.textContent = "Offline";
@@ -279,6 +292,7 @@ function connectWebSocket() {
       JSON.stringify({
         type: "session.start",
         sample_rate: audioContext ? audioContext.sampleRate : 48000,
+        language: selectedLanguage(),
       }),
     );
     setState("listening", "Ascolto");
@@ -457,9 +471,13 @@ function onSocketMessage(event) {
     case "session.ready":
       ttsSampleRate = message.tts_sample_rate;
       configureClientBargeIn(message);
-      sessionLabel.textContent = `Sessione ${message.session_id.slice(0, 8)}`;
+      sessionShortId = message.session_id.slice(0, 8);
+      updateSessionLabel(message.language || selectedLanguage());
       break;
     case "session.started":
+      if (message.language) {
+        updateSessionLabel(message.language);
+      }
       connectionLabel.textContent = "Online";
       setState("listening", "Ascolto");
       break;
@@ -542,6 +560,19 @@ function onSocketMessage(event) {
       break;
     default:
       break;
+  }
+}
+
+function selectedLanguage() {
+  return languageSelect ? languageSelect.value : "it";
+}
+
+function updateSessionLabel(language) {
+  const label = LANGUAGE_LABELS[language] || language || "Italiano";
+  if (sessionShortId) {
+    sessionLabel.textContent = `Sessione ${sessionShortId} · ${label}`;
+  } else {
+    sessionLabel.textContent = `Sessione ${label}`;
   }
 }
 

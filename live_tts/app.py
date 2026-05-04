@@ -66,6 +66,8 @@ async def health() -> dict[str, object]:
         "llm_backend": config.llm_backend,
         "tts_voice_mode": config.tts_voice_mode,
         "tts_instruct": config.tts_instruct,
+        "tts_language": config.tts_language,
+        "stt_language": config.stt_language,
         "tts_num_step_first": config.tts_num_step_first,
         "tts_num_step_next": config.tts_num_step_next,
         "tts_speed": config.tts_speed,
