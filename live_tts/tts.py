@@ -184,7 +184,7 @@ class OmniVoiceTTS(BaseTTS):
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt
             else:
-                kwargs["instruct"] = self.config.tts_instruct
+                kwargs["instruct"] = self._voice_instruct()
 
             audio = self.model.generate(**kwargs)
 
@@ -195,6 +195,15 @@ class OmniVoiceTTS(BaseTTS):
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
         waveform = apply_edge_fade(waveform, self.sample_rate)
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
+
+    def _voice_instruct(self) -> str:
+        instruct = self.config.tts_instruct.strip()
+        style = self.config.tts_voice_style.strip()
+        if not style:
+            return instruct
+        if not instruct:
+            return style
+        return f"{instruct}, {style}"
 
     def _maybe_create_anchor(
         self,

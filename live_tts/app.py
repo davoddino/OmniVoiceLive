@@ -31,13 +31,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def startup() -> None:
     ensure_websocket_support()
     logger.info(
-        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s session_voice_anchor=%s startup_voice_anchor=%s",
+        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s session_voice_anchor=%s startup_voice_anchor=%s client_barge_threshold=%.4f",
         config.tts_backend,
         config.stt_backend,
         config.llm_backend,
         bool(config.ssl_certfile and config.ssl_keyfile),
         config.tts_session_voice_anchor,
         config.tts_startup_voice_anchor,
+        config.client_barge_threshold,
     )
     await tts_service.start()
     logger.info("live_tts ready tts_sample_rate=%s", tts_service.sample_rate)
@@ -57,6 +58,9 @@ async def health() -> dict[str, object]:
         "stt_backend": config.stt_backend,
         "llm_backend": config.llm_backend,
         "websocket_support": has_websocket_support(),
+        "client_barge_threshold": config.client_barge_threshold,
+        "client_barge_stop_ms": config.client_barge_stop_ms,
+        "client_barge_commit_ms": config.client_barge_commit_ms,
     }
 
 

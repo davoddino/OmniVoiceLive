@@ -83,6 +83,10 @@ class RealtimeSession:
             session_id=self.session_id,
             tts_sample_rate=self.tts.sample_rate,
             tts_frame_ms=self.config.tts_frame_ms,
+            client_barge_threshold=self.config.client_barge_threshold,
+            client_barge_stop_ms=self.config.client_barge_stop_ms,
+            client_barge_commit_ms=self.config.client_barge_commit_ms,
+            client_barge_cooldown_ms=self.config.client_barge_cooldown_ms,
         )
 
         try:

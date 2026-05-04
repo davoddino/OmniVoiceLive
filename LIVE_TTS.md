@@ -172,14 +172,15 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=female, low pitch
+LIVE_TTS_VOICE_STYLE=warm, friendly, slightly enthusiastic, natural call-center voice
 LIVE_TTS_NUM_STEP_FIRST=16
 LIVE_TTS_NUM_STEP_NEXT=24
-LIVE_TTS_SPEED=1.05
+LIVE_TTS_SPEED=1.07
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao! Sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
@@ -190,6 +191,11 @@ LIVE_TTS_WHISPER_COMPUTE_TYPE=int8_float16
 LIVE_TTS_LLM_BACKEND=openai
 LIVE_TTS_LLM_URL=http://192.168.0.20:8001/v1/chat/completions
 LIVE_TTS_LLM_MODEL=qwen3.6-35b
+
+LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
+LIVE_TTS_CLIENT_BARGE_STOP_MS=20
+LIVE_TTS_CLIENT_BARGE_COMMIT_MS=45
+LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=700
 ```
 
 Per testare solo trasporto audio e UI senza GPU:
@@ -223,7 +229,8 @@ puo' cambiare il timbro tra chunk e tra risposte diverse. Per mantenere la prima
 risposta veloce senza usare una voce esterna clonata, `live_tts` usa
 self-conditioning con ancora di sessione:
 
-1. all'avvio genera una frase breve con `instruct="female, low pitch"`;
+1. all'avvio genera una frase breve con `instruct="female, low pitch"` e
+   `LIVE_TTS_VOICE_STYLE`;
 2. quell'audio sintetico diventa l'ancora vocale di base;
 3. ogni nuova sessione WebSocket riceve quell'ancora;
 4. tutti i chunk e tutti i turni della stessa chiamata usano la stessa voce.
@@ -235,7 +242,8 @@ LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
+LIVE_TTS_VOICE_STYLE=warm, friendly, slightly enthusiastic, natural call-center voice
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao! Sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
 ```
 
 Questo non richiede una voce clonata dell'utente o di una persona reale: stabilizza
@@ -243,6 +251,24 @@ la voce auto-generata da OmniVoice a partire dal voice-design scelto. Se disatti
 `LIVE_TTS_STARTUP_VOICE_ANCHOR`, la prima risposta creera' l'ancora durante la
 conversazione; se disattivi `LIVE_TTS_SESSION_VOICE_ANCHOR`, l'ancora torna a
 essere locale al singolo turno.
+
+## Barge-In Locale
+
+Il browser ferma subito il player quando il microfono supera la soglia locale
+mentre l'assistente sta parlando. Dopo pochi millisecondi di voce confermata invia
+anche `barge_in` al server e scarta eventuali frame audio vecchi arrivati in
+ritardo.
+
+```text
+LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
+LIVE_TTS_CLIENT_BARGE_STOP_MS=20
+LIVE_TTS_CLIENT_BARGE_COMMIT_MS=45
+LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=700
+```
+
+Se si interrompe troppo facilmente per eco dagli speaker, alza
+`LIVE_TTS_CLIENT_BARGE_THRESHOLD` a `0.016` o `0.018`. Se invece non interrompe
+abbastanza rapidamente, scendi verso `0.009`.
 
 ## Hardening Per Produzione
 

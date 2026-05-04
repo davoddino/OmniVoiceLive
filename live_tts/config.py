@@ -8,6 +8,7 @@ DEFAULT_SYSTEM_PROMPT = """
 Sei un assistente vocale call-center per CavadaLabs.
 Rispondi sempre in italiano naturale e parlato.
 Usa frasi brevi, concrete e facili da ascoltare.
+Mantieni un tono cordiale, professionale e leggermente energico.
 Non usare markdown, elenchi, titoli, asterischi o codice.
 Quando non hai abbastanza informazioni, fai una domanda breve.
 Non superare 100 parole salvo necessita' reale.
@@ -57,6 +58,7 @@ class LiveTTSConfig:
     tts_dtype: str
     tts_language: str
     tts_instruct: str
+    tts_voice_style: str
     tts_num_step_first: int
     tts_num_step_next: int
     tts_speed: float
@@ -90,6 +92,10 @@ class LiveTTSConfig:
     vad_min_turn_ms: int
     vad_preroll_ms: int
     vad_max_turn_s: float
+    client_barge_threshold: float
+    client_barge_stop_ms: int
+    client_barge_commit_ms: int
+    client_barge_cooldown_ms: int
 
     @classmethod
     def from_env(cls) -> "LiveTTSConfig":
@@ -106,9 +112,13 @@ class LiveTTSConfig:
             tts_dtype=_env("LIVE_TTS_DTYPE", "float16"),
             tts_language=_env("LIVE_TTS_LANGUAGE", "it"),
             tts_instruct=_env("LIVE_TTS_INSTRUCT", "female, low pitch"),
+            tts_voice_style=_env(
+                "LIVE_TTS_VOICE_STYLE",
+                "warm, friendly, slightly enthusiastic, natural call-center voice",
+            ),
             tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 16),
             tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 24),
-            tts_speed=_env_float("LIVE_TTS_SPEED", 1.05),
+            tts_speed=_env_float("LIVE_TTS_SPEED", 1.07),
             tts_frame_ms=_env_int("LIVE_TTS_FRAME_MS", 40),
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
@@ -122,7 +132,7 @@ class LiveTTSConfig:
             ),
             tts_startup_anchor_text=_env(
                 "LIVE_TTS_STARTUP_ANCHOR_TEXT",
-                "Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.",
+                "Ciao! Sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.",
             ),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
             stt_url=_env("LIVE_TTS_STT_URL", ""),
@@ -148,4 +158,12 @@ class LiveTTSConfig:
             vad_min_turn_ms=_env_int("LIVE_TTS_VAD_MIN_TURN_MS", 320),
             vad_preroll_ms=_env_int("LIVE_TTS_VAD_PREROLL_MS", 220),
             vad_max_turn_s=_env_float("LIVE_TTS_VAD_MAX_TURN_S", 18.0),
+            client_barge_threshold=_env_float(
+                "LIVE_TTS_CLIENT_BARGE_THRESHOLD", 0.012
+            ),
+            client_barge_stop_ms=_env_int("LIVE_TTS_CLIENT_BARGE_STOP_MS", 20),
+            client_barge_commit_ms=_env_int("LIVE_TTS_CLIENT_BARGE_COMMIT_MS", 45),
+            client_barge_cooldown_ms=_env_int(
+                "LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS", 700
+            ),
         )

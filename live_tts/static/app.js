@@ -28,6 +28,9 @@ let fallbackBufferLastAt = 0;
 let activeAssistantMessage = null;
 let assistantSpeaking = false;
 let bargeSent = false;
+let audioPlaybackBlocked = false;
+let activeAudioTurnId = null;
+let blockedAudioTurnId = null;
 let currentTurnId = null;
 let socketWasOpen = false;
 let socketOpenTimer = null;
@@ -36,9 +39,13 @@ let callStartedAt = 0;
 let timerInterval = null;
 
 const clientVad = {
-  threshold: 0.018,
+  threshold: 0.012,
+  stopMs: 20,
+  commitMs: 45,
+  cooldownMs: 700,
   speechMs: 0,
-  lastBargeAt: 0,
+  interruptMs: 0,
+  lastBargeAt: Number.NEGATIVE_INFINITY,
 };
 
 startButton.addEventListener("click", startCall);
@@ -168,6 +175,10 @@ function cleanup(label) {
   fallbackQueuedSamples = 0;
   assistantSpeaking = false;
   bargeSent = false;
+  audioPlaybackBlocked = false;
+  activeAudioTurnId = null;
+  blockedAudioTurnId = null;
+  resetClientVad();
   stopTimer();
   startButton.disabled = false;
   stopButton.disabled = true;
@@ -334,19 +345,66 @@ function updateClientVad(frame) {
 
   const now = performance.now();
   if (
+    (assistantSpeaking || audioPlaybackBlocked) &&
+    rms >= clientVad.threshold &&
+    now - clientVad.lastBargeAt > clientVad.cooldownMs
+  ) {
+    clientVad.interruptMs += (frame.length / audioContext.sampleRate) * 1000;
+  } else if (rms < clientVad.threshold) {
+    clientVad.interruptMs = 0;
+    releaseTentativeBargeIn();
+  }
+
+  if (
     assistantSpeaking &&
-    clientVad.speechMs >= 80 &&
+    clientVad.interruptMs >= clientVad.stopMs &&
+    !audioPlaybackBlocked
+  ) {
+    blockAssistantAudioPlayback();
+  }
+
+  if (
+    audioPlaybackBlocked &&
+    clientVad.interruptMs >= clientVad.commitMs &&
     !bargeSent &&
-    now - clientVad.lastBargeAt > 800
+    now - clientVad.lastBargeAt > clientVad.cooldownMs
   ) {
     bargeSent = true;
     clientVad.lastBargeAt = now;
-    clearPlayer();
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "barge_in" }));
     }
     setState("interrupted", "Interrotto");
   }
+}
+
+function blockAssistantAudioPlayback() {
+  audioPlaybackBlocked = true;
+  blockedAudioTurnId = activeAudioTurnId || currentTurnId;
+  assistantSpeaking = false;
+  clearPlayer();
+  bufferLabel.textContent = "0 ms";
+  connectionLabel.textContent = "Interrotto";
+  setState("interrupted", "Interrotto");
+}
+
+function resetClientVad() {
+  clientVad.speechMs = 0;
+  clientVad.interruptMs = 0;
+}
+
+function releaseTentativeBargeIn() {
+  if (!audioPlaybackBlocked || bargeSent || activeAudioTurnId === null) {
+    return;
+  }
+  if (blockedAudioTurnId !== activeAudioTurnId) {
+    return;
+  }
+  audioPlaybackBlocked = false;
+  blockedAudioTurnId = null;
+  assistantSpeaking = true;
+  connectionLabel.textContent = "TTS";
+  setState("speaking", "Rispondo");
 }
 
 function onSocketMessage(event) {
@@ -359,6 +417,7 @@ function onSocketMessage(event) {
   switch (message.type) {
     case "session.ready":
       ttsSampleRate = message.tts_sample_rate;
+      configureClientBargeIn(message);
       sessionLabel.textContent = `Sessione ${message.session_id.slice(0, 8)}`;
       break;
     case "session.started":
@@ -394,8 +453,16 @@ function onSocketMessage(event) {
       appendAssistantText(message.turn_id, message.text);
       break;
     case "assistant.audio_start":
+      activeAudioTurnId = message.turn_id;
+      if (blockedAudioTurnId === message.turn_id) {
+        audioPlaybackBlocked = true;
+        clearPlayer();
+        break;
+      }
+      audioPlaybackBlocked = false;
       assistantSpeaking = true;
       bargeSent = false;
+      resetClientVad();
       connectionLabel.textContent = "TTS";
       setState("speaking", "Rispondo");
       break;
@@ -405,12 +472,22 @@ function onSocketMessage(event) {
     case "assistant.done":
       assistantSpeaking = false;
       bargeSent = false;
+      audioPlaybackBlocked = false;
+      activeAudioTurnId = null;
+      blockedAudioTurnId = null;
+      resetClientVad();
       connectionLabel.textContent = "Online";
       setState("listening", "Ascolto");
       break;
     case "turn.cancelled":
       assistantSpeaking = false;
+      activeAudioTurnId = null;
+      resetClientVad();
       clearPlayer();
+      audioPlaybackBlocked = blockedAudioTurnId === message.turn_id;
+      if (!audioPlaybackBlocked) {
+        blockedAudioTurnId = null;
+      }
       connectionLabel.textContent = "Interrotto";
       setState("interrupted", "Interrotto");
       break;
@@ -429,7 +506,7 @@ function onSocketMessage(event) {
 }
 
 function enqueueAudio(arrayBuffer) {
-  if (!playerNode || !audioContext) {
+  if (!playerNode || !audioContext || audioPlaybackBlocked) {
     return;
   }
   const pcm = new Int16Array(arrayBuffer);
@@ -439,6 +516,21 @@ function enqueueAudio(arrayBuffer) {
   }
   const resampled = resampleLinear(floats, ttsSampleRate, audioContext.sampleRate);
   enqueuePlayerSamples(resampled);
+}
+
+function configureClientBargeIn(message) {
+  if (Number.isFinite(message.client_barge_threshold)) {
+    clientVad.threshold = message.client_barge_threshold;
+  }
+  if (Number.isFinite(message.client_barge_stop_ms)) {
+    clientVad.stopMs = message.client_barge_stop_ms;
+  }
+  if (Number.isFinite(message.client_barge_commit_ms)) {
+    clientVad.commitMs = message.client_barge_commit_ms;
+  }
+  if (Number.isFinite(message.client_barge_cooldown_ms)) {
+    clientVad.cooldownMs = message.client_barge_cooldown_ms;
+  }
 }
 
 function clearPlayer() {
