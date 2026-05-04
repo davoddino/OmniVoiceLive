@@ -184,10 +184,10 @@ class LiveTTSConfig:
             tts_device_map=_env("LIVE_TTS_DEVICE_MAP", "cuda:0"),
             tts_dtype=_env("LIVE_TTS_DTYPE", "float16"),
             tts_language=_env("LIVE_TTS_LANGUAGE", "it"),
-            tts_instruct=_env("LIVE_TTS_INSTRUCT", "female, low pitch"),
+            tts_instruct=_env("LIVE_TTS_INSTRUCT", "male, middle-aged, low pitch"),
             tts_voice_mode=_env("LIVE_TTS_VOICE_MODE", "session_anchor"),
-            tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 24),
-            tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 36),
+            tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 28),
+            tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 40),
             tts_speed=_env_float("LIVE_TTS_SPEED", 1.0),
             tts_guidance_scale=_env_float("LIVE_TTS_GUIDANCE_SCALE", 2.0),
             tts_position_temperature=_env_float(
@@ -200,7 +200,7 @@ class LiveTTSConfig:
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
             tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
-            tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 1.2),
+            tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 1.6),
             tts_session_voice_anchor=_env_bool(
                 "LIVE_TTS_SESSION_VOICE_ANCHOR", True
             ),
@@ -210,11 +210,12 @@ class LiveTTSConfig:
             tts_startup_anchor_text=_env(
                 "LIVE_TTS_STARTUP_ANCHOR_TEXT",
                 (
-                    "Ciao, questa e' una voce di riferimento in italiano. Sto "
-                    "parlando in modo naturale, con un tono rilassato ma chiaro, "
-                    "come in una conversazione reale. CavadaLabs aiuta le aziende "
-                    "a usare l'intelligenza artificiale senza complicazioni, "
-                    "trasformando processi complessi in strumenti semplici e concreti."
+                    "Ciao, questa e' una voce maschile di riferimento in italiano. "
+                    "Sto parlando con tono calmo, deciso e professionale, come in "
+                    "una conversazione reale con un consulente tecnico. CavadaLabs "
+                    "aiuta le aziende a usare l'intelligenza artificiale senza "
+                    "complicazioni, trasformando processi complessi in strumenti "
+                    "semplici, concreti e affidabili."
                 ),
             ),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),

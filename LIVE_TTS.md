@@ -10,9 +10,9 @@ sostituire STT, LLM o TTS senza riscrivere il frontend.
 
 ## Vincoli Di Prodotto
 
-- Voce: voice design OmniVoice, non voice cloning.
-- Profilo vocale iniziale: lo stesso stile di `test.py`, cioe' italiano con
-  `instruct="female, low pitch"`.
+- Voce: voice design OmniVoice con anchor sintetica di sessione, non voce umana
+  clonata.
+- Profilo vocale iniziale: italiano con `instruct="male, middle-aged, low pitch"`.
 - Prima risposta: deve partire il prima possibile, privilegiando un primo segmento
   breve e sintetizzato con meno diffusion steps.
 - Conversazione: l'assistente deve fermarsi quando l'utente parla sopra.
@@ -149,8 +149,8 @@ Configurazione prevista:
 
 - primo segmento: 42-105 caratteri circa;
 - segmenti successivi: 180-380 caratteri circa;
-- `num_step` primo segmento: 24;
-- `num_step` successivi: 36 di default;
+- `num_step` primo segmento: 28;
+- `num_step` successivi: 40 di default;
 - temperatura deterministica per ridurre variazioni tra segmenti;
 - modello caricato una volta all'avvio;
 - warmup TTS all'avvio;
@@ -174,10 +174,10 @@ LIVE_TTS_MODEL=k2-fsa/OmniVoice
 LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
-LIVE_TTS_INSTRUCT=female, low pitch
+LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
 LIVE_TTS_VOICE_MODE=session_anchor
-LIVE_TTS_NUM_STEP_FIRST=24
-LIVE_TTS_NUM_STEP_NEXT=36
+LIVE_TTS_NUM_STEP_FIRST=28
+LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.0
 LIVE_TTS_GUIDANCE_SCALE=2.0
 LIVE_TTS_POSITION_TEMPERATURE=0.0
@@ -185,10 +185,10 @@ LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_POSTPROCESS_OUTPUT=false
 LIVE_TTS_DENOISE=true
 LIVE_TTS_SELF_CONDITION=true
-LIVE_TTS_ANCHOR_MIN_SECONDS=1.2
+LIVE_TTS_ANCHOR_MIN_SECONDS=1.6
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao, questa e' una voce di riferimento in italiano. Sto parlando in modo naturale, con un tono rilassato ma chiaro, come in una conversazione reale. CavadaLabs aiuta le aziende a usare l'intelligenza artificiale senza complicazioni, trasformando processi complessi in strumenti semplici e concreti.
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao, questa e' una voce maschile di riferimento in italiano. Sto parlando con tono calmo, deciso e professionale, come in una conversazione reale con un consulente tecnico. CavadaLabs aiuta le aziende a usare l'intelligenza artificiale senza complicazioni, trasformando processi complessi in strumenti semplici, concreti e affidabili.
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
@@ -242,9 +242,8 @@ Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 ## Stabilita' Del Timbro
 
 La modalita' predefinita e' `session_anchor`. All'avvio il server genera una
-reference sintetica con OmniVoice, usando `instruct="female, low pitch"` come in
-`test.py`. Quella reference viene usata come blocco vocale per tutti i chunk della
-chiamata.
+reference sintetica con OmniVoice, usando `instruct="male, middle-aged, low pitch"`.
+Quella reference viene usata come blocco vocale per tutti i chunk della chiamata.
 
 Non richiede una voce esterna o una persona reale: l'ancora nasce dalla stessa
 voce voice-design del modello. Serve solo a evitare che ogni chunk venga
@@ -254,9 +253,9 @@ Variabili:
 
 ```text
 LIVE_TTS_VOICE_MODE=session_anchor
-LIVE_TTS_INSTRUCT=female, low pitch
-LIVE_TTS_NUM_STEP_FIRST=24
-LIVE_TTS_NUM_STEP_NEXT=36
+LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
+LIVE_TTS_NUM_STEP_FIRST=28
+LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.0
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
