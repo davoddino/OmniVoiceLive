@@ -147,10 +147,10 @@ sprecata rimane controllato.
 
 Configurazione prevista:
 
-- primo segmento: 28-70 caratteri circa;
-- segmenti successivi: 90-220 caratteri circa;
-- `num_step` primo segmento: 16;
-- `num_step` successivi: 24 di default;
+- primo segmento: 42-105 caratteri circa;
+- segmenti successivi: 180-380 caratteri circa;
+- `num_step` primo segmento: 24;
+- `num_step` successivi: 36 di default;
 - temperatura deterministica per ridurre variazioni tra segmenti;
 - modello caricato una volta all'avvio;
 - warmup TTS all'avvio;
@@ -176,14 +176,19 @@ LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=female, low pitch
 LIVE_TTS_VOICE_MODE=session_anchor
-LIVE_TTS_NUM_STEP_FIRST=20
-LIVE_TTS_NUM_STEP_NEXT=28
-LIVE_TTS_SPEED=1.05
+LIVE_TTS_NUM_STEP_FIRST=24
+LIVE_TTS_NUM_STEP_NEXT=36
+LIVE_TTS_SPEED=1.0
+LIVE_TTS_GUIDANCE_SCALE=2.0
+LIVE_TTS_POSITION_TEMPERATURE=0.0
+LIVE_TTS_CLASS_TEMPERATURE=0.0
+LIVE_TTS_POSTPROCESS_OUTPUT=false
+LIVE_TTS_DENOISE=true
 LIVE_TTS_SELF_CONDITION=true
-LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
+LIVE_TTS_ANCHOR_MIN_SECONDS=1.2
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Parlo in italiano con un tono naturale, chiaro e rilassato. Ti ascolto con attenzione e rispondo in modo semplice, concreto e professionale.
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao, questa e' una voce di riferimento in italiano. Sto parlando in modo naturale, con un tono rilassato ma chiaro, come in una conversazione reale. CavadaLabs aiuta le aziende a usare l'intelligenza artificiale senza complicazioni, trasformando processi complessi in strumenti semplici e concreti.
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
@@ -194,7 +199,13 @@ LIVE_TTS_WHISPER_COMPUTE_TYPE=int8_float16
 LIVE_TTS_LLM_BACKEND=openai
 LIVE_TTS_LLM_URL=http://192.168.0.20:8001/v1/chat/completions
 LIVE_TTS_LLM_MODEL=qwen3.6-35b
-LIVE_TTS_LLM_TEMPERATURE=0.2
+LIVE_TTS_SYSTEM_PROMPT_FILE=live_tts/prompts/cavadalabs_voice.md
+LIVE_TTS_LLM_TEMPERATURE=0.3
+
+LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=42
+LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=105
+LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=180
+LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=380
 
 LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
 LIVE_TTS_CLIENT_BARGE_STOP_MS=20
@@ -244,10 +255,17 @@ Variabili:
 ```text
 LIVE_TTS_VOICE_MODE=session_anchor
 LIVE_TTS_INSTRUCT=female, low pitch
+LIVE_TTS_NUM_STEP_FIRST=24
+LIVE_TTS_NUM_STEP_NEXT=36
+LIVE_TTS_SPEED=1.0
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
 ```
+
+I chunk sono volutamente piu' lunghi dopo la prima risposta: il primo segmento
+parte ancora rapidamente, ma i segmenti successivi riducono i reset di timbro.
+Il prompt vocale predefinito e' in `live_tts/prompts/cavadalabs_voice.md`.
 
 Se vuoi tornare alla modalita' pura di `test.py`, senza nessun blocco vocale,
 imposta `LIVE_TTS_VOICE_MODE=voice_design`, ma la differenza tra chunk tende ad

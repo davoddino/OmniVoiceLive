@@ -65,8 +65,12 @@ class LiveTextSegmenter:
 
         min_chars = self.min_first_chars if self.first else self.min_next_chars
         max_chars = self.max_first_chars if self.first else self.max_next_chars
+        lookahead_chars = min(len(buffer), int(max_chars * 1.25))
 
-        strong_cut = max((buffer.rfind(d) for d in self.strong_delimiters), default=-1)
+        strong_cut = max(
+            (buffer.rfind(d, 0, lookahead_chars + 1) for d in self.strong_delimiters),
+            default=-1,
+        )
         if strong_cut + 1 >= min_chars:
             return self._cut(strong_cut + 1)
 

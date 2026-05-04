@@ -5,21 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_SYSTEM_PROMPT = """
-Sei un assistente vocale call-center per CavadaLabs.
-Rispondi sempre in italiano naturale e parlato.
-Usa frasi brevi, concrete e facili da ascoltare.
-Mantieni il contesto della conversazione e non ripetere il saluto iniziale.
-Non ripresentarti a ogni messaggio: dopo il primo turno rispondi direttamente.
-Se la trascrizione contiene piccoli errori, interpreta l'intento piu' probabile.
-Se l'utente chiede cosa sai fare, spiega in modo naturale come puoi aiutarlo.
-Non usare markdown, elenchi, titoli, asterischi o codice.
-Quando non hai abbastanza informazioni, fai una domanda breve.
-Non superare 70 parole salvo necessita' reale.
-
-CavadaLabs aiuta le aziende italiane a integrare intelligenza artificiale,
-OCR, trascrizioni, knowledge management, server GPU, CRM, ERP e database.
-""".strip()
+DEFAULT_SYSTEM_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "cavadalabs_voice.md"
+)
+DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 
 _ENV_FILES_LOADED = False
@@ -104,6 +93,18 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _configured_system_prompt() -> str:
+    inline_prompt = os.getenv("LIVE_TTS_SYSTEM_PROMPT")
+    if inline_prompt:
+        return inline_prompt
+
+    prompt_file = os.getenv("LIVE_TTS_SYSTEM_PROMPT_FILE")
+    if prompt_file:
+        return Path(prompt_file).expanduser().read_text(encoding="utf-8").strip()
+
+    return DEFAULT_SYSTEM_PROMPT
+
+
 @dataclass(frozen=True)
 class LiveTTSConfig:
     host: str
@@ -123,6 +124,11 @@ class LiveTTSConfig:
     tts_num_step_first: int
     tts_num_step_next: int
     tts_speed: float
+    tts_guidance_scale: float
+    tts_position_temperature: float
+    tts_class_temperature: float
+    tts_postprocess_output: bool
+    tts_denoise: bool
     tts_frame_ms: int
     tts_warmup_enabled: bool
     tts_warmup_text: str
@@ -146,6 +152,11 @@ class LiveTTSConfig:
     llm_top_p: float
     llm_timeout_s: float
     system_prompt: str
+
+    segment_min_first_chars: int
+    segment_max_first_chars: int
+    segment_min_next_chars: int
+    segment_max_next_chars: int
 
     vad_speech_threshold: float
     vad_start_ms: int
@@ -175,14 +186,21 @@ class LiveTTSConfig:
             tts_language=_env("LIVE_TTS_LANGUAGE", "it"),
             tts_instruct=_env("LIVE_TTS_INSTRUCT", "female, low pitch"),
             tts_voice_mode=_env("LIVE_TTS_VOICE_MODE", "session_anchor"),
-            tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 20),
-            tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 28),
-            tts_speed=_env_float("LIVE_TTS_SPEED", 1.05),
+            tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 24),
+            tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 36),
+            tts_speed=_env_float("LIVE_TTS_SPEED", 1.0),
+            tts_guidance_scale=_env_float("LIVE_TTS_GUIDANCE_SCALE", 2.0),
+            tts_position_temperature=_env_float(
+                "LIVE_TTS_POSITION_TEMPERATURE", 0.0
+            ),
+            tts_class_temperature=_env_float("LIVE_TTS_CLASS_TEMPERATURE", 0.0),
+            tts_postprocess_output=_env_bool("LIVE_TTS_POSTPROCESS_OUTPUT", False),
+            tts_denoise=_env_bool("LIVE_TTS_DENOISE", True),
             tts_frame_ms=_env_int("LIVE_TTS_FRAME_MS", 40),
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
             tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
-            tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 0.45),
+            tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 1.2),
             tts_session_voice_anchor=_env_bool(
                 "LIVE_TTS_SESSION_VOICE_ANCHOR", True
             ),
@@ -192,9 +210,11 @@ class LiveTTSConfig:
             tts_startup_anchor_text=_env(
                 "LIVE_TTS_STARTUP_ANCHOR_TEXT",
                 (
-                    "Buongiorno, sono pronta ad aiutarti. Parlo in italiano con "
-                    "un tono naturale, chiaro e rilassato. Ti ascolto con attenzione "
-                    "e rispondo in modo semplice, concreto e professionale."
+                    "Ciao, questa e' una voce di riferimento in italiano. Sto "
+                    "parlando in modo naturale, con un tono rilassato ma chiaro, "
+                    "come in una conversazione reale. CavadaLabs aiuta le aziende "
+                    "a usare l'intelligenza artificiale senza complicazioni, "
+                    "trasformando processi complessi in strumenti semplici e concreti."
                 ),
             ),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
@@ -211,10 +231,14 @@ class LiveTTSConfig:
                 "http://192.168.0.20:8001/v1/chat/completions",
             ),
             llm_model=_env("LIVE_TTS_LLM_MODEL", "qwen3.6-35b"),
-            llm_temperature=_env_float("LIVE_TTS_LLM_TEMPERATURE", 0.2),
+            llm_temperature=_env_float("LIVE_TTS_LLM_TEMPERATURE", 0.3),
             llm_top_p=_env_float("LIVE_TTS_LLM_TOP_P", 1.0),
             llm_timeout_s=_env_float("LIVE_TTS_LLM_TIMEOUT_S", 120.0),
-            system_prompt=_env("LIVE_TTS_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
+            system_prompt=_configured_system_prompt(),
+            segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 42),
+            segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 105),
+            segment_min_next_chars=_env_int("LIVE_TTS_SEGMENT_MIN_NEXT_CHARS", 180),
+            segment_max_next_chars=_env_int("LIVE_TTS_SEGMENT_MAX_NEXT_CHARS", 380),
             vad_speech_threshold=_env_float("LIVE_TTS_VAD_THRESHOLD", 0.014),
             vad_start_ms=_env_int("LIVE_TTS_VAD_START_MS", 140),
             vad_end_ms=_env_int("LIVE_TTS_VAD_END_MS", 650),

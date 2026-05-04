@@ -179,15 +179,16 @@ class OmniVoiceTTS(BaseTTS):
                 "language": self.config.tts_language,
                 "num_step": num_step,
                 "speed": self.config.tts_speed,
-                "guidance_scale": 2.0,
-                "position_temperature": 0.0,
-                "class_temperature": 0.0,
-                "postprocess_output": False,
+                "guidance_scale": self.config.tts_guidance_scale,
+                "position_temperature": self.config.tts_position_temperature,
+                "class_temperature": self.config.tts_class_temperature,
+                "postprocess_output": self.config.tts_postprocess_output,
+                "denoise": self.config.tts_denoise,
             }
+            if self.config.tts_instruct.strip():
+                kwargs["instruct"] = self.config.tts_instruct
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt
-            else:
-                kwargs["instruct"] = self.config.tts_instruct
 
             audio = self.model.generate(**kwargs)
 

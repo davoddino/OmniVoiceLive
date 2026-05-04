@@ -282,7 +282,12 @@ class RealtimeSession:
         full_text: list[str] = []
 
         async def produce_text() -> None:
-            segmenter = LiveTextSegmenter()
+            segmenter = LiveTextSegmenter(
+                min_first_chars=self.config.segment_min_first_chars,
+                max_first_chars=self.config.segment_max_first_chars,
+                min_next_chars=self.config.segment_min_next_chars,
+                max_next_chars=self.config.segment_max_next_chars,
+            )
             try:
                 await self.send_event("assistant.thinking", turn_id=turn_id)
                 async for piece in self.llm.stream(user_text, history, runtime.cancel):

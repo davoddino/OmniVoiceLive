@@ -31,13 +31,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def startup() -> None:
     ensure_websocket_support()
     logger.info(
-        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s instruct=%r client_barge_threshold=%.4f",
+        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s instruct=%r num_step=%s/%s speed=%.2f segments=%s-%s/%s-%s client_barge_threshold=%.4f",
         config.tts_backend,
         config.stt_backend,
         config.llm_backend,
         bool(config.ssl_certfile and config.ssl_keyfile),
         config.tts_voice_mode,
         config.tts_instruct,
+        config.tts_num_step_first,
+        config.tts_num_step_next,
+        config.tts_speed,
+        config.segment_min_first_chars,
+        config.segment_max_first_chars,
+        config.segment_min_next_chars,
+        config.segment_max_next_chars,
         config.client_barge_threshold,
     )
     await tts_service.start()
@@ -59,6 +66,13 @@ async def health() -> dict[str, object]:
         "llm_backend": config.llm_backend,
         "tts_voice_mode": config.tts_voice_mode,
         "tts_instruct": config.tts_instruct,
+        "tts_num_step_first": config.tts_num_step_first,
+        "tts_num_step_next": config.tts_num_step_next,
+        "tts_speed": config.tts_speed,
+        "segment_min_first_chars": config.segment_min_first_chars,
+        "segment_max_first_chars": config.segment_max_first_chars,
+        "segment_min_next_chars": config.segment_min_next_chars,
+        "segment_max_next_chars": config.segment_max_next_chars,
         "websocket_support": has_websocket_support(),
         "client_barge_threshold": config.client_barge_threshold,
         "client_barge_stop_ms": config.client_barge_stop_ms,
