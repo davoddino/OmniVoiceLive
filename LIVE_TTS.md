@@ -172,15 +172,14 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=female, low pitch
-LIVE_TTS_VOICE_STYLE=young adult
 LIVE_TTS_NUM_STEP_FIRST=16
 LIVE_TTS_NUM_STEP_NEXT=24
-LIVE_TTS_SPEED=1.07
+LIVE_TTS_SPEED=1.05
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao! Sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
@@ -229,8 +228,7 @@ puo' cambiare il timbro tra chunk e tra risposte diverse. Per mantenere la prima
 risposta veloce senza usare una voce esterna clonata, `live_tts` usa
 self-conditioning con ancora di sessione:
 
-1. all'avvio genera una frase breve con `instruct="female, low pitch"` e
-   `LIVE_TTS_VOICE_STYLE`;
+1. all'avvio genera una frase breve con `instruct="female, low pitch"`;
 2. quell'audio sintetico diventa l'ancora vocale di base;
 3. ogni nuova sessione WebSocket riceve quell'ancora;
 4. tutti i chunk e tutti i turni della stessa chiamata usano la stessa voce.
@@ -242,8 +240,7 @@ LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_VOICE_STYLE=young adult
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao! Sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
 ```
 
 Questo non richiede una voce clonata dell'utente o di una persona reale: stabilizza
@@ -251,11 +248,6 @@ la voce auto-generata da OmniVoice a partire dal voice-design scelto. Se disatti
 `LIVE_TTS_STARTUP_VOICE_ANCHOR`, la prima risposta creera' l'ancora durante la
 conversazione; se disattivi `LIVE_TTS_SESSION_VOICE_ANCHOR`, l'ancora torna a
 essere locale al singolo turno.
-
-`LIVE_TTS_INSTRUCT` e `LIVE_TTS_VOICE_STYLE` non sono testo libero: OmniVoice
-accetta solo tag supportati, ad esempio `female`, `young adult`, `low pitch`,
-`moderate pitch` o accenti. Parole come `warm`, `friendly` o `enthusiastic`
-vengono ignorate per evitare errori di avvio.
 
 ## Barge-In Locale
 
