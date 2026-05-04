@@ -299,6 +299,7 @@ class RealtimeSession:
         async def consume_tts() -> None:
             first = True
             segment_index = 0
+            tts_state = self.tts.create_turn_state()
             while True:
                 segment = await segment_queue.get()
                 if segment is None:
@@ -322,7 +323,11 @@ class RealtimeSession:
                     sample_rate=self.tts.sample_rate,
                 )
                 synth_started = time.monotonic()
-                waveform = await self.tts.synthesize(segment, first=first)
+                waveform = await self.tts.synthesize(
+                    segment,
+                    first=first,
+                    state=tts_state,
+                )
                 if runtime.cancel.is_set() or self.current is not runtime:
                     break
 

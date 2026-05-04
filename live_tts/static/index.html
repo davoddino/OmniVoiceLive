@@ -9,13 +9,22 @@
   <body>
     <main class="shell">
       <section class="topbar">
-        <div>
-          <h1>OmniVoice Live</h1>
-          <p id="sessionLabel">Sessione non avviata</p>
+        <div class="brandRow">
+          <div class="productMark">OV</div>
+          <div>
+            <h1>CavadaLabs Voice Desk</h1>
+            <p id="sessionLabel">Sessione non avviata</p>
+          </div>
         </div>
-        <div class="actions">
-          <button id="startButton" class="primary">Avvia chiamata</button>
-          <button id="stopButton" disabled>Termina</button>
+        <div class="topControls">
+          <div class="callMeta">
+            <span id="transportLabel" class="statusBadge">HTTPS/WSS</span>
+            <span id="timerLabel" class="timer">00:00</span>
+          </div>
+          <div class="actions">
+            <button id="startButton" class="primary">Avvia chiamata</button>
+            <button id="stopButton" disabled>Termina</button>
+          </div>
         </div>
       </section>
 
@@ -49,12 +58,26 @@
               <strong id="bufferLabel">0 ms</strong>
             </div>
           </div>
+          <div class="voiceCard">
+            <span class="label">Voce</span>
+            <strong id="voiceModeLabel">Stabilizzata per turno</strong>
+            <span id="audioModeLabel">Audio in attesa</span>
+          </div>
         </aside>
 
-        <section class="conversation" id="conversation"></section>
+        <section class="conversationPanel">
+          <div class="conversationHeader">
+            <div>
+              <span class="label">Timeline</span>
+              <strong>Conversazione</strong>
+            </div>
+            <span id="connectionLabel" class="connectionPill">Offline</span>
+          </div>
+          <section class="conversation" id="conversation"></section>
+        </section>
       </section>
     </main>
 
-    <script src="/static/app.js?v=2" type="module"></script>
+    <script src="/static/app.js?v=4" type="module"></script>
   </body>
 </html>

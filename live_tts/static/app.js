@@ -8,10 +8,16 @@ const sttLatency = document.getElementById("sttLatency");
 const ttsLatency = document.getElementById("ttsLatency");
 const turnLabel = document.getElementById("turnLabel");
 const bufferLabel = document.getElementById("bufferLabel");
+const timerLabel = document.getElementById("timerLabel");
+const transportLabel = document.getElementById("transportLabel");
+const connectionLabel = document.getElementById("connectionLabel");
+const audioModeLabel = document.getElementById("audioModeLabel");
+const voiceModeLabel = document.getElementById("voiceModeLabel");
 
 let socket = null;
 let audioContext = null;
 let recorderNode = null;
+let recorderSinkNode = null;
 let playerNode = null;
 let mediaStream = null;
 let ttsSampleRate = 24000;
@@ -23,6 +29,11 @@ let activeAssistantMessage = null;
 let assistantSpeaking = false;
 let bargeSent = false;
 let currentTurnId = null;
+let socketWasOpen = false;
+let socketOpenTimer = null;
+let cleaningUp = false;
+let callStartedAt = 0;
+let timerInterval = null;
 
 const clientVad = {
   threshold: 0.018,
@@ -35,15 +46,25 @@ stopButton.addEventListener("click", stopCall);
 
 async function startCall() {
   try {
+    cleaningUp = false;
     setState("connecting", "Connessione");
     startButton.disabled = true;
+    transportLabel.textContent =
+      location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
+    connectionLabel.textContent = "Avvio";
+    voiceModeLabel.textContent = "Stabilizzata per turno";
 
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) {
       throw new Error("Web Audio API non disponibile in questo browser.");
     }
+    addSystemMessage("INFO: Creo AudioContext.");
     audioContext = new AudioContextClass({ latencyHint: "interactive" });
+    addSystemMessage(
+      `INFO: AudioContext state=${audioContext.state}, sampleRate=${audioContext.sampleRate}.`,
+    );
 
+    addSystemMessage("INFO: Richiedo accesso al microfono.");
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -52,45 +73,30 @@ async function startCall() {
         channelCount: 1,
       },
     });
+    addSystemMessage("INFO: Microfono autorizzato.");
     const source = audioContext.createMediaStreamSource(mediaStream);
 
     const canUseWorklet = Boolean(audioContext.audioWorklet && window.AudioWorkletNode);
     if (canUseWorklet) {
       try {
         await setupAudioWorkletGraph(source);
+        audioModeLabel.textContent = "AudioWorklet";
         addSystemMessage("INFO: AudioWorklet attivo.");
       } catch (error) {
         addSystemMessage(
           `INFO: AudioWorklet non disponibile, uso fallback iOS. Dettaglio: ${error.message}`,
         );
         setupScriptProcessorGraph(source);
+        audioModeLabel.textContent = "Fallback iOS";
       }
     } else {
       addSystemMessage("INFO: AudioWorklet non disponibile, uso fallback iOS.");
       setupScriptProcessorGraph(source);
+      audioModeLabel.textContent = "Fallback iOS";
     }
 
-    await audioContext.resume();
-
-    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(`${wsProto}//${location.host}/ws`);
-    socket.binaryType = "arraybuffer";
-    socket.onopen = () => {
-      socket.send(
-        JSON.stringify({
-          type: "session.start",
-          sample_rate: audioContext.sampleRate,
-        }),
-      );
-      setState("listening", "Ascolto");
-      stopButton.disabled = false;
-    };
-    socket.onmessage = onSocketMessage;
-    socket.onclose = () => cleanup("Chiamata terminata");
-    socket.onerror = () => {
-      setState("error", "Errore");
-      addSystemMessage("Errore di connessione WebSocket.");
-    };
+    connectWebSocket();
+    resumeAudioContextWithTimeout();
   } catch (error) {
     cleanup("Avvio non riuscito");
     setState("error", "Errore");
@@ -106,12 +112,24 @@ function stopCall() {
 }
 
 function cleanup(label) {
+  cleaningUp = true;
+  if (socketOpenTimer) {
+    clearTimeout(socketOpenTimer);
+    socketOpenTimer = null;
+  }
   if (playerNode) {
     clearPlayer();
   }
   if (recorderNode) {
     try {
       recorderNode.disconnect();
+    } catch (_error) {
+      // Already disconnected.
+    }
+  }
+  if (recorderSinkNode) {
+    try {
+      recorderSinkNode.disconnect();
     } catch (_error) {
       // Already disconnected.
     }
@@ -128,26 +146,38 @@ function cleanup(label) {
       track.stop();
     }
   }
-  if (socket && socket.readyState === WebSocket.OPEN) {
+  if (
+    socket &&
+    (socket.readyState === WebSocket.OPEN ||
+      socket.readyState === WebSocket.CONNECTING)
+  ) {
     socket.close();
   }
   if (audioContext && audioContext.state !== "closed") {
     audioContext.close().catch(() => {});
   }
   socket = null;
+  socketWasOpen = false;
   audioContext = null;
   mediaStream = null;
   recorderNode = null;
+  recorderSinkNode = null;
   playerNode = null;
   fallbackPlayerQueue = [];
   fallbackPlayerOffset = 0;
   fallbackQueuedSamples = 0;
   assistantSpeaking = false;
   bargeSent = false;
+  stopTimer();
   startButton.disabled = false;
   stopButton.disabled = true;
   sessionLabel.textContent = label;
+  connectionLabel.textContent = "Offline";
+  audioModeLabel.textContent = "Audio in attesa";
   setState("idle", "Idle");
+  setTimeout(() => {
+    cleaningUp = false;
+  }, 0);
 }
 
 function onMicFrame(event) {
@@ -173,6 +203,10 @@ async function setupAudioWorkletGraph(source) {
 
   recorderNode = new AudioWorkletNode(audioContext, "recorder-worklet");
   source.connect(recorderNode);
+  recorderSinkNode = audioContext.createGain();
+  recorderSinkNode.gain.value = 0;
+  recorderNode.connect(recorderSinkNode);
+  recorderSinkNode.connect(audioContext.destination);
   recorderNode.port.onmessage = onMicFrame;
 }
 
@@ -194,6 +228,93 @@ function setupScriptProcessorGraph(source) {
   };
   source.connect(recorderNode);
   recorderNode.connect(audioContext.destination);
+}
+
+function connectWebSocket() {
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProto}//${location.host}/ws`;
+  addSystemMessage(`INFO: Apro WebSocket ${wsUrl}`);
+  connectionLabel.textContent = "Connessione";
+
+  socketWasOpen = false;
+  socket = new WebSocket(wsUrl);
+  socket.binaryType = "arraybuffer";
+
+  socketOpenTimer = setTimeout(() => {
+    if (socket && socket.readyState !== WebSocket.OPEN) {
+      addSystemMessage(
+        `INFO: WebSocket ancora non aperto dopo 5s, readyState=${socket.readyState}.`,
+      );
+      setState("error", "Errore");
+      socket.close();
+    }
+  }, 5000);
+
+  socket.onopen = () => {
+    socketWasOpen = true;
+    if (socketOpenTimer) {
+      clearTimeout(socketOpenTimer);
+      socketOpenTimer = null;
+    }
+    addSystemMessage("INFO: WebSocket aperto.");
+    connectionLabel.textContent = "Online";
+    socket.send(
+      JSON.stringify({
+        type: "session.start",
+        sample_rate: audioContext ? audioContext.sampleRate : 48000,
+      }),
+    );
+    setState("listening", "Ascolto");
+    startTimer();
+    stopButton.disabled = false;
+  };
+
+  socket.onmessage = onSocketMessage;
+  socket.onclose = (event) => {
+    if (socketOpenTimer) {
+      clearTimeout(socketOpenTimer);
+      socketOpenTimer = null;
+    }
+    if (cleaningUp) {
+      return;
+    }
+    const reason = event.reason ? ` reason=${event.reason}` : "";
+    if (socketWasOpen) {
+      addSystemMessage(`INFO: WebSocket chiuso code=${event.code}${reason}.`);
+      connectionLabel.textContent = "Offline";
+      cleanup("Chiamata terminata");
+    } else {
+      cleanup("WebSocket non aperto");
+      setState("error", "Errore");
+      addSystemMessage(`INFO: WebSocket non aperto code=${event.code}${reason}.`);
+    }
+  };
+
+  socket.onerror = () => {
+    addSystemMessage("INFO: Errore WebSocket. Controlla certificato, IP e firewall.");
+    connectionLabel.textContent = "Errore";
+    setState("error", "Errore");
+  };
+}
+
+async function resumeAudioContextWithTimeout(timeoutMs = 1200) {
+  if (!audioContext) {
+    return;
+  }
+  addSystemMessage(`INFO: Resume AudioContext da state=${audioContext.state}.`);
+  try {
+    const result = await Promise.race([
+      audioContext.resume().then(() => "ok"),
+      new Promise((resolve) => {
+        setTimeout(() => resolve("timeout"), timeoutMs);
+      }),
+    ]);
+    addSystemMessage(
+      `INFO: Resume AudioContext result=${result}, state=${audioContext.state}.`,
+    );
+  } catch (error) {
+    addSystemMessage(`INFO: Resume AudioContext fallito: ${error.message}.`);
+  }
 }
 
 function updateClientVad(frame) {
@@ -241,15 +362,18 @@ function onSocketMessage(event) {
       sessionLabel.textContent = `Sessione ${message.session_id.slice(0, 8)}`;
       break;
     case "session.started":
+      connectionLabel.textContent = "Online";
       setState("listening", "Ascolto");
       break;
     case "audio.meter":
       updateServerMeter(message.rms);
       break;
     case "vad.speech_start":
+      connectionLabel.textContent = "Utente";
       setState("user-speaking", "Utente parla");
       break;
     case "vad.speech_end":
+      connectionLabel.textContent = "STT";
       setState("transcribing", "Trascrivo");
       break;
     case "stt.final":
@@ -259,6 +383,7 @@ function onSocketMessage(event) {
       if (message.text) {
         addMessage("user", "Utente", message.text);
       }
+      connectionLabel.textContent = "LLM";
       setState("thinking", "Elaboro");
       break;
     case "assistant.thinking":
@@ -271,6 +396,7 @@ function onSocketMessage(event) {
     case "assistant.audio_start":
       assistantSpeaking = true;
       bargeSent = false;
+      connectionLabel.textContent = "TTS";
       setState("speaking", "Rispondo");
       break;
     case "assistant.audio_ready":
@@ -279,18 +405,22 @@ function onSocketMessage(event) {
     case "assistant.done":
       assistantSpeaking = false;
       bargeSent = false;
+      connectionLabel.textContent = "Online";
       setState("listening", "Ascolto");
       break;
     case "turn.cancelled":
       assistantSpeaking = false;
       clearPlayer();
+      connectionLabel.textContent = "Interrotto";
       setState("interrupted", "Interrotto");
       break;
     case "turn.empty":
+      connectionLabel.textContent = "Online";
       setState("listening", "Ascolto");
       break;
     case "error":
       addSystemMessage(message.message || "Errore non specificato.");
+      connectionLabel.textContent = "Errore";
       setState("error", "Errore");
       break;
     default:
@@ -426,6 +556,30 @@ function addSystemMessage(text) {
 function setState(className, label) {
   document.body.className = `state-${className}`;
   stateLabel.textContent = label;
+}
+
+function startTimer() {
+  if (timerInterval) {
+    return;
+  }
+  callStartedAt = Date.now();
+  updateTimer();
+  timerInterval = setInterval(updateTimer, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  timerLabel.textContent = "00:00";
+}
+
+function updateTimer() {
+  const elapsed = Math.max(0, Math.floor((Date.now() - callStartedAt) / 1000));
+  const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const seconds = String(elapsed % 60).padStart(2, "0");
+  timerLabel.textContent = `${minutes}:${seconds}`;
 }
 
 function updateServerMeter(rms) {

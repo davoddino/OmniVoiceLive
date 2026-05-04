@@ -175,6 +175,8 @@ LIVE_TTS_INSTRUCT=female, low pitch
 LIVE_TTS_NUM_STEP_FIRST=16
 LIVE_TTS_NUM_STEP_NEXT=24
 LIVE_TTS_SPEED=1.05
+LIVE_TTS_SELF_CONDITION=true
+LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
@@ -210,6 +212,27 @@ http://127.0.0.1:8020
 Per microfono e autoplay in produzione va servito dietro HTTPS. In locale i browser
 accettano normalmente `localhost`/`127.0.0.1` come secure context per il microfono.
 Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
+
+## Stabilita' Del Timbro
+
+In modalita' voice-design pura, generare ogni micro-segmento in modo indipendente
+puo' cambiare il timbro tra chunk. Per mantenere la prima risposta veloce senza
+usare una voce esterna clonata, `live_tts` usa self-conditioning per turno:
+
+1. il primo segmento viene generato con `instruct="female, low pitch"`;
+2. se e' abbastanza lungo, il suo audio diventa un'ancora vocale temporanea;
+3. i segmenti successivi dello stesso turno usano quell'ancora;
+4. l'ancora viene scartata al turno successivo.
+
+Variabili:
+
+```text
+LIVE_TTS_SELF_CONDITION=true
+LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
+```
+
+Questo non richiede una voce clonata dell'utente o di una persona reale: stabilizza
+la voce auto-generata dal primo chunk della risposta.
 
 ## Hardening Per Produzione
 

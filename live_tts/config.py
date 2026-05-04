@@ -63,6 +63,8 @@ class LiveTTSConfig:
     tts_frame_ms: int
     tts_warmup_enabled: bool
     tts_warmup_text: str
+    tts_self_condition: bool
+    tts_anchor_min_seconds: float
 
     stt_backend: str
     stt_url: str
@@ -107,6 +109,8 @@ class LiveTTSConfig:
             tts_frame_ms=_env_int("LIVE_TTS_FRAME_MS", 40),
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
+            tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
+            tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 0.45),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
             stt_url=_env("LIVE_TTS_STT_URL", ""),
             stt_language=_env("LIVE_TTS_STT_LANGUAGE", "it"),
