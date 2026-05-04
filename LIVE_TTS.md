@@ -12,8 +12,8 @@ sostituire STT, LLM o TTS senza riscrivere il frontend.
 
 - Voce: voice design OmniVoice, non voce umana clonata.
 - Profilo vocale iniziale: italiano con `instruct="male, middle-aged, low pitch"`.
-- Prima risposta: deve partire il prima possibile, privilegiando un primo segmento
-  breve e sintetizzato con meno diffusion steps.
+- Prima risposta: deve restare veloce, ma senza spezzare troppo il parlato: la
+  stabilita' del timbro vale piu' della primissima sillaba immediata.
 - Conversazione: l'assistente deve fermarsi quando l'utente parla sopra.
 - Browser: riproduzione automatica dello stream audio dopo il gesto iniziale
   "Avvia chiamata".
@@ -146,11 +146,11 @@ sprecata rimane controllato.
 
 Configurazione prevista:
 
-- primo segmento: 42-105 caratteri circa;
-- segmenti successivi: 180-380 caratteri circa;
-- `num_step` primo segmento: 28;
+- primo segmento: 160-420 caratteri circa;
+- segmenti successivi: 420-900 caratteri circa;
+- `num_step` primo segmento: 40;
 - `num_step` successivi: 40 di default;
-- temperatura deterministica per ridurre variazioni tra segmenti;
+- meno segmenti possibili per ridurre i reset vocali tra chunk;
 - modello caricato una volta all'avvio;
 - warmup TTS all'avvio;
 - trim edge leggero dei segmenti audio per rimuovere padding/fade artificiali.
@@ -202,10 +202,10 @@ LIVE_TTS_LLM_MODEL=qwen3.6-35b
 LIVE_TTS_SYSTEM_PROMPT_FILE=live_tts/prompts/cavadalabs_voice.md
 LIVE_TTS_LLM_TEMPERATURE=0.3
 
-LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=42
-LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=105
-LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=180
-LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=380
+LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=160
+LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=420
+LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=420
+LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=900
 
 LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
 LIVE_TTS_CLIENT_BARGE_STOP_MS=20
