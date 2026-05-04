@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OmniVoice Live</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <h1>OmniVoice Live</h1>
+          <p id="sessionLabel">Sessione non avviata</p>
+        </div>
+        <div class="actions">
+          <button id="startButton" class="primary">Avvia chiamata</button>
+          <button id="stopButton" disabled>Termina</button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="statusPanel">
+          <div class="statusBlock">
+            <span class="label">Stato</span>
+            <strong id="stateLabel">Idle</strong>
+          </div>
+          <div class="meterWrap">
+            <span class="label">Microfono</span>
+            <div class="meter">
+              <div id="meterFill"></div>
+            </div>
+          </div>
+          <div class="statusGrid">
+            <div>
+              <span class="label">STT</span>
+              <strong id="sttLatency">-</strong>
+            </div>
+            <div>
+              <span class="label">TTS</span>
+              <strong id="ttsLatency">-</strong>
+            </div>
+            <div>
+              <span class="label">Turno</span>
+              <strong id="turnLabel">-</strong>
+            </div>
+            <div>
+              <span class="label">Buffer</span>
+              <strong id="bufferLabel">0 ms</strong>
+            </div>
+          </div>
+        </aside>
+
+        <section class="conversation" id="conversation"></section>
+      </section>
+    </main>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
