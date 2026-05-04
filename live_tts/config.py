@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 DEFAULT_SYSTEM_PROMPT = """
@@ -15,6 +16,61 @@ Non superare 100 parole salvo necessita' reale.
 CavadaLabs aiuta le aziende italiane a integrare intelligenza artificiale,
 OCR, trascrizioni, knowledge management, server GPU, CRM, ERP e database.
 """.strip()
+
+
+_ENV_FILES_LOADED = False
+
+
+def load_env_files() -> None:
+    global _ENV_FILES_LOADED
+    if _ENV_FILES_LOADED:
+        return
+    _ENV_FILES_LOADED = True
+
+    explicit = os.getenv("LIVE_TTS_ENV_FILE")
+    if explicit:
+        candidates = [Path(explicit).expanduser()]
+    else:
+        repo_root = Path(__file__).resolve().parents[1]
+        candidates = [
+            Path.cwd() / ".env",
+            Path.cwd() / "live_tts.env",
+            repo_root / ".env",
+            repo_root / "live_tts.env",
+        ]
+
+    seen: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        _load_env_file(resolved)
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or not key.replace("_", "").isalnum():
+            continue
+        os.environ.setdefault(key, _parse_env_value(value))
+
+
+def _parse_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value
 
 
 def _env(name: str, default: str) -> str:
@@ -97,6 +153,7 @@ class LiveTTSConfig:
 
     @classmethod
     def from_env(cls) -> "LiveTTSConfig":
+        load_env_files()
         return cls(
             host=_env("LIVE_TTS_HOST", "0.0.0.0"),
             port=_env_int("LIVE_TTS_PORT", 8020),

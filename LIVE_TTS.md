@@ -160,6 +160,9 @@ Configurazione prevista:
 
 Le variabili principali:
 
+`live_tts` carica automaticamente `.env` o `live_tts.env` dalla root della repo.
+`LIVE_TTS_ENV_FILE=/percorso/file.env` permette di indicare un file diverso.
+
 ```text
 LIVE_TTS_HOST=0.0.0.0
 LIVE_TTS_PORT=8020
@@ -206,6 +209,8 @@ LIVE_TTS_LLM_BACKEND=mock
 ```
 
 ## Avvio
+
+Con `.env` configurato:
 
 ```bash
 uv run python -m live_tts

@@ -160,28 +160,11 @@ curl http://127.0.0.1:8000/health
 
 ## 7. Avvia Live TTS In HTTPS
 
-In un secondo terminale, dalla root della repo:
+`live_tts` carica automaticamente `.env` o `live_tts.env` dalla root della repo.
+Il file [.env.example](.env.example) contiene la configurazione Ubuntu completa.
+Una volta preparato `.env`, in un secondo terminale avvii solo:
 
 ```bash
-LIVE_TTS_HOST=0.0.0.0 \
-LIVE_TTS_PORT=8020 \
-LIVE_TTS_LOG_LEVEL=info \
-LIVE_TTS_SSL_CERTFILE=certs/live_tts.pem \
-LIVE_TTS_SSL_KEYFILE=certs/live_tts-key.pem \
-LIVE_TTS_STT_BACKEND=http \
-LIVE_TTS_STT_URL=http://127.0.0.1:8000/transcribe \
-LIVE_TTS_LLM_BACKEND=openai \
-LIVE_TTS_LLM_URL=http://192.168.0.20:8001/v1/chat/completions \
-LIVE_TTS_LLM_MODEL=qwen3.6-35b \
-LIVE_TTS_TTS_BACKEND=omnivoice \
-LIVE_TTS_MODEL=k2-fsa/OmniVoice \
-LIVE_TTS_DEVICE_MAP=cuda:0 \
-LIVE_TTS_DTYPE=float16 \
-LIVE_TTS_LANGUAGE=it \
-LIVE_TTS_INSTRUCT="female, low pitch" \
-LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012 \
-LIVE_TTS_CLIENT_BARGE_STOP_MS=20 \
-LIVE_TTS_CLIENT_BARGE_COMMIT_MS=45 \
 uv run python -m live_tts
 ```
 

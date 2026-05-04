@@ -27,10 +27,13 @@ let fallbackQueuedSamples = 0;
 let fallbackBufferLastAt = 0;
 let activeAssistantMessage = null;
 let assistantSpeaking = false;
+let assistantPlaybackActive = false;
+let assistantDonePending = false;
 let bargeSent = false;
 let audioPlaybackBlocked = false;
 let activeAudioTurnId = null;
 let blockedAudioTurnId = null;
+let playerBufferedMs = 0;
 let currentTurnId = null;
 let socketWasOpen = false;
 let socketOpenTimer = null;
@@ -173,7 +176,10 @@ function cleanup(label) {
   fallbackPlayerQueue = [];
   fallbackPlayerOffset = 0;
   fallbackQueuedSamples = 0;
+  playerBufferedMs = 0;
   assistantSpeaking = false;
+  assistantPlaybackActive = false;
+  assistantDonePending = false;
   bargeSent = false;
   audioPlaybackBlocked = false;
   activeAudioTurnId = null;
@@ -208,7 +214,7 @@ async function setupAudioWorkletGraph(source) {
   playerNode.connect(audioContext.destination);
   playerNode.port.onmessage = (event) => {
     if (event.data.type === "buffer") {
-      bufferLabel.textContent = `${event.data.ms} ms`;
+      updatePlayerBuffer(event.data.ms);
     }
   };
 
@@ -345,22 +351,21 @@ function updateClientVad(frame) {
 
   const now = performance.now();
   if (
-    (assistantSpeaking || audioPlaybackBlocked) &&
+    (isAssistantAudioActive() || audioPlaybackBlocked) &&
     rms >= clientVad.threshold &&
     now - clientVad.lastBargeAt > clientVad.cooldownMs
   ) {
     clientVad.interruptMs += (frame.length / audioContext.sampleRate) * 1000;
   } else if (rms < clientVad.threshold) {
     clientVad.interruptMs = 0;
-    releaseTentativeBargeIn();
   }
 
   if (
-    assistantSpeaking &&
+    isAssistantAudioActive() &&
     clientVad.interruptMs >= clientVad.stopMs &&
     !audioPlaybackBlocked
   ) {
-    blockAssistantAudioPlayback();
+    blockAssistantAudioPlayback(rms);
   }
 
   if (
@@ -378,12 +383,18 @@ function updateClientVad(frame) {
   }
 }
 
-function blockAssistantAudioPlayback() {
+function blockAssistantAudioPlayback(rms) {
   audioPlaybackBlocked = true;
   blockedAudioTurnId = activeAudioTurnId || currentTurnId;
   assistantSpeaking = false;
+  assistantPlaybackActive = false;
+  assistantDonePending = false;
   clearPlayer();
   bufferLabel.textContent = "0 ms";
+  sendBargeIn();
+  addSystemMessage(
+    `INFO: Barge-in locale rms=${rms.toFixed(4)} soglia=${clientVad.threshold}.`,
+  );
   connectionLabel.textContent = "Interrotto";
   setState("interrupted", "Interrotto");
 }
@@ -393,18 +404,46 @@ function resetClientVad() {
   clientVad.interruptMs = 0;
 }
 
-function releaseTentativeBargeIn() {
-  if (!audioPlaybackBlocked || bargeSent || activeAudioTurnId === null) {
+function isAssistantAudioActive() {
+  return assistantSpeaking || assistantPlaybackActive || playerBufferedMs > 0;
+}
+
+function sendBargeIn() {
+  const now = performance.now();
+  if (bargeSent || now - clientVad.lastBargeAt <= clientVad.cooldownMs) {
     return;
   }
-  if (blockedAudioTurnId !== activeAudioTurnId) {
-    return;
+  bargeSent = true;
+  clientVad.lastBargeAt = now;
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: "barge_in" }));
   }
+}
+
+function updatePlayerBuffer(ms) {
+  playerBufferedMs = Math.max(0, Number(ms) || 0);
+  bufferLabel.textContent = `${playerBufferedMs} ms`;
+  if (playerBufferedMs > 0 && !audioPlaybackBlocked) {
+    assistantPlaybackActive = true;
+  }
+  if (playerBufferedMs === 0 && assistantDonePending && !audioPlaybackBlocked) {
+    assistantPlaybackActive = false;
+    finishAssistantPlayback();
+  } else if (playerBufferedMs === 0 && !assistantSpeaking) {
+    assistantPlaybackActive = false;
+  }
+}
+
+function finishAssistantPlayback() {
+  assistantSpeaking = false;
+  assistantPlaybackActive = false;
+  assistantDonePending = false;
   audioPlaybackBlocked = false;
+  activeAudioTurnId = null;
   blockedAudioTurnId = null;
-  assistantSpeaking = true;
-  connectionLabel.textContent = "TTS";
-  setState("speaking", "Rispondo");
+  resetClientVad();
+  connectionLabel.textContent = "Online";
+  setState("listening", "Ascolto");
 }
 
 function onSocketMessage(event) {
@@ -461,6 +500,8 @@ function onSocketMessage(event) {
       }
       audioPlaybackBlocked = false;
       assistantSpeaking = true;
+      assistantPlaybackActive = false;
+      assistantDonePending = false;
       bargeSent = false;
       resetClientVad();
       connectionLabel.textContent = "TTS";
@@ -471,16 +512,15 @@ function onSocketMessage(event) {
       break;
     case "assistant.done":
       assistantSpeaking = false;
-      bargeSent = false;
-      audioPlaybackBlocked = false;
-      activeAudioTurnId = null;
-      blockedAudioTurnId = null;
-      resetClientVad();
-      connectionLabel.textContent = "Online";
-      setState("listening", "Ascolto");
+      assistantDonePending = true;
+      if (!assistantPlaybackActive && playerBufferedMs === 0) {
+        finishAssistantPlayback();
+      }
       break;
     case "turn.cancelled":
       assistantSpeaking = false;
+      assistantPlaybackActive = false;
+      assistantDonePending = false;
       activeAudioTurnId = null;
       resetClientVad();
       clearPlayer();
@@ -509,6 +549,7 @@ function enqueueAudio(arrayBuffer) {
   if (!playerNode || !audioContext || audioPlaybackBlocked) {
     return;
   }
+  assistantPlaybackActive = true;
   const pcm = new Int16Array(arrayBuffer);
   const floats = new Float32Array(pcm.length);
   for (let i = 0; i < pcm.length; i += 1) {
@@ -540,6 +581,7 @@ function clearPlayer() {
   fallbackPlayerQueue = [];
   fallbackPlayerOffset = 0;
   fallbackQueuedSamples = 0;
+  playerBufferedMs = 0;
   bufferLabel.textContent = "0 ms";
 }
 
@@ -585,12 +627,12 @@ function onFallbackPlayerProcess(event) {
 
 function updateFallbackBufferLabel() {
   if (!audioContext) {
-    bufferLabel.textContent = "0 ms";
+    updatePlayerBuffer(0);
     return;
   }
-  bufferLabel.textContent = `${Math.round(
-    (fallbackQueuedSamples / audioContext.sampleRate) * 1000,
-  )} ms`;
+  updatePlayerBuffer(
+    Math.round((fallbackQueuedSamples / audioContext.sampleRate) * 1000),
+  );
 }
 
 function resampleLinear(input, fromRate, toRate) {
