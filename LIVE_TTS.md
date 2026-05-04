@@ -10,8 +10,7 @@ sostituire STT, LLM o TTS senza riscrivere il frontend.
 
 ## Vincoli Di Prodotto
 
-- Voce: voice design OmniVoice con anchor sintetica di sessione, non voce umana
-  clonata.
+- Voce: voice design OmniVoice, non voce umana clonata.
 - Profilo vocale iniziale: italiano con `instruct="male, middle-aged, low pitch"`.
 - Prima risposta: deve partire il prima possibile, privilegiando un primo segmento
   breve e sintetizzato con meno diffusion steps.
@@ -175,20 +174,20 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
-LIVE_TTS_VOICE_MODE=session_anchor
-LIVE_TTS_NUM_STEP_FIRST=28
+LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_NUM_STEP_FIRST=40
 LIVE_TTS_NUM_STEP_NEXT=40
-LIVE_TTS_SPEED=1.0
+LIVE_TTS_SPEED=1.05
 LIVE_TTS_GUIDANCE_SCALE=2.0
-LIVE_TTS_POSITION_TEMPERATURE=0.0
+LIVE_TTS_POSITION_TEMPERATURE=2.0
 LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_POSTPROCESS_OUTPUT=false
 LIVE_TTS_DENOISE=true
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=1.6
 LIVE_TTS_ANCHOR_MAX_SECONDS=6.0
-LIVE_TTS_SESSION_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_VOICE_ANCHOR=true
+LIVE_TTS_SESSION_VOICE_ANCHOR=false
+LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 LIVE_TTS_STARTUP_ANCHOR_TEXT=Parlo in italiano con voce maschile, calma, chiara e professionale.
 
 LIVE_TTS_STT_BACKEND=auto
@@ -242,34 +241,34 @@ Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 
 ## Stabilita' Del Timbro
 
-La modalita' predefinita e' `session_anchor`. All'avvio il server genera una
-reference sintetica con OmniVoice, usando `instruct="male, middle-aged, low pitch"`.
-Quella reference viene usata come blocco vocale per tutti i chunk della chiamata.
+La modalita' predefinita dopo il voice lab e' `voice_design`, impostata sul
+candidato 14:
 
-Non richiede una voce esterna o una persona reale: l'ancora nasce dalla stessa
-voce voice-design del modello. Serve solo a evitare che ogni chunk venga
-campionato con un timbro diverso.
+```text
+LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
+LIVE_TTS_NUM_STEP_FIRST=40
+LIVE_TTS_NUM_STEP_NEXT=40
+LIVE_TTS_SPEED=1.05
+LIVE_TTS_GUIDANCE_SCALE=2.0
+LIVE_TTS_POSITION_TEMPERATURE=2.0
+LIVE_TTS_CLASS_TEMPERATURE=0.0
+```
 
-Variabili:
+Non richiede una voce esterna o una persona reale e non crea anchor all'avvio.
+La voce quindi corrisponde ai file generati dal voice lab, con lo stesso set di
+parametri.
+
+La modalita' `session_anchor` resta disponibile per esperimenti di stabilita' tra
+chunk, ma puo' peggiorare la naturalezza se la reference sintetica non e' buona.
+Per usarla:
 
 ```text
 LIVE_TTS_VOICE_MODE=session_anchor
 LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
-LIVE_TTS_NUM_STEP_FIRST=28
-LIVE_TTS_NUM_STEP_NEXT=40
-LIVE_TTS_SPEED=1.0
-LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
 ```
-
-I chunk sono volutamente piu' lunghi dopo la prima risposta: il primo segmento
-parte ancora rapidamente, ma i segmenti successivi riducono i reset di timbro.
-Il prompt vocale predefinito e' in `live_tts/prompts/cavadalabs_voice.md`.
-
-Se vuoi tornare alla modalita' pura di `test.py`, senza nessun blocco vocale,
-imposta `LIVE_TTS_VOICE_MODE=voice_design`, ma la differenza tra chunk tende ad
-aumentare.
 
 ## Barge-In Locale
 
