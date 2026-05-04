@@ -114,7 +114,7 @@ class LiveTTSConfig:
             tts_instruct=_env("LIVE_TTS_INSTRUCT", "female, low pitch"),
             tts_voice_style=_env(
                 "LIVE_TTS_VOICE_STYLE",
-                "warm, friendly, slightly enthusiastic, natural call-center voice",
+                "young adult",
             ),
             tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 16),
             tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 24),

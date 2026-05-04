@@ -172,7 +172,7 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=female, low pitch
-LIVE_TTS_VOICE_STYLE=warm, friendly, slightly enthusiastic, natural call-center voice
+LIVE_TTS_VOICE_STYLE=young adult
 LIVE_TTS_NUM_STEP_FIRST=16
 LIVE_TTS_NUM_STEP_NEXT=24
 LIVE_TTS_SPEED=1.07
@@ -242,7 +242,7 @@ LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_VOICE_STYLE=warm, friendly, slightly enthusiastic, natural call-center voice
+LIVE_TTS_VOICE_STYLE=young adult
 LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao! Sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
 ```
 
@@ -251,6 +251,11 @@ la voce auto-generata da OmniVoice a partire dal voice-design scelto. Se disatti
 `LIVE_TTS_STARTUP_VOICE_ANCHOR`, la prima risposta creera' l'ancora durante la
 conversazione; se disattivi `LIVE_TTS_SESSION_VOICE_ANCHOR`, l'ancora torna a
 essere locale al singolo turno.
+
+`LIVE_TTS_INSTRUCT` e `LIVE_TTS_VOICE_STYLE` non sono testo libero: OmniVoice
+accetta solo tag supportati, ad esempio `female`, `young adult`, `low pitch`,
+`moderate pitch` o accenti. Parole come `warm`, `friendly` o `enthusiastic`
+vengono ignorate per evitare errori di avvio.
 
 ## Barge-In Locale
 

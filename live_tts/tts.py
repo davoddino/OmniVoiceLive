@@ -17,6 +17,33 @@ from live_tts.config import LiveTTSConfig
 logger = logging.getLogger(__name__)
 
 
+VALID_ENGLISH_INSTRUCT_ITEMS = {
+    "american accent",
+    "australian accent",
+    "british accent",
+    "canadian accent",
+    "child",
+    "chinese accent",
+    "elderly",
+    "female",
+    "high pitch",
+    "indian accent",
+    "japanese accent",
+    "korean accent",
+    "low pitch",
+    "male",
+    "middle-aged",
+    "moderate pitch",
+    "portuguese accent",
+    "russian accent",
+    "teenager",
+    "very high pitch",
+    "very low pitch",
+    "whisper",
+    "young adult",
+}
+
+
 @dataclass
 class TTSTurnState:
     voice_prompt: Any | None = None
@@ -77,6 +104,7 @@ class OmniVoiceTTS(BaseTTS):
         self._startup_voice_prompt: Any | None = None
         self._startup_anchor_text = ""
         self._startup_anchor_duration_s = 0.0
+        self._instruct_warning_emitted = False
 
     async def start(self) -> None:
         logger.info(
@@ -197,13 +225,34 @@ class OmniVoiceTTS(BaseTTS):
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
 
     def _voice_instruct(self) -> str:
-        instruct = self.config.tts_instruct.strip()
-        style = self.config.tts_voice_style.strip()
-        if not style:
-            return instruct
-        if not instruct:
-            return style
-        return f"{instruct}, {style}"
+        raw = ", ".join(
+            part.strip()
+            for part in (self.config.tts_instruct, self.config.tts_voice_style)
+            if part.strip()
+        )
+        accepted: list[str] = []
+        rejected: list[str] = []
+        for item in raw.split(","):
+            normalized = " ".join(item.strip().lower().split())
+            if not normalized:
+                continue
+            if normalized in VALID_ENGLISH_INSTRUCT_ITEMS:
+                if normalized not in accepted:
+                    accepted.append(normalized)
+            else:
+                rejected.append(normalized)
+
+        if rejected and not self._instruct_warning_emitted:
+            logger.warning(
+                "omnivoice ignored unsupported instruct items=%s; use OmniVoice supported tags only",
+                rejected,
+            )
+            self._instruct_warning_emitted = True
+
+        if accepted:
+            return ", ".join(accepted)
+        logger.warning("omnivoice instruct empty after validation; using default voice")
+        return "female, low pitch"
 
     def _maybe_create_anchor(
         self,
