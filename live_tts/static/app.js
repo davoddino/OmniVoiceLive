@@ -52,7 +52,7 @@ async function startCall() {
     transportLabel.textContent =
       location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
     connectionLabel.textContent = "Avvio";
-    voiceModeLabel.textContent = "Stabilizzata per turno";
+    voiceModeLabel.textContent = "Stabile per sessione";
 
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) {

@@ -24,7 +24,7 @@ from live_tts.config import LiveTTSConfig
 from live_tts.llm import LLMStreamer
 from live_tts.segmenter import LiveTextSegmenter
 from live_tts.stt import STTService
-from live_tts.tts import BaseTTS
+from live_tts.tts import BaseTTS, TTSTurnState
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,9 @@ class RealtimeSession:
         self.history: list[dict[str, str]] = []
         self.turn_counter = 0
         self.current: TurnRuntime | None = None
+        self.tts_session_state: TTSTurnState | None = (
+            tts.create_turn_state() if config.tts_session_voice_anchor else None
+        )
         self.closed = False
 
     async def run(self) -> None:
@@ -299,7 +302,7 @@ class RealtimeSession:
         async def consume_tts() -> None:
             first = True
             segment_index = 0
-            tts_state = self.tts.create_turn_state()
+            tts_state = self.tts_session_state or self.tts.create_turn_state()
             while True:
                 segment = await segment_queue.get()
                 if segment is None:

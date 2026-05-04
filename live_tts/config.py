@@ -65,6 +65,9 @@ class LiveTTSConfig:
     tts_warmup_text: str
     tts_self_condition: bool
     tts_anchor_min_seconds: float
+    tts_session_voice_anchor: bool
+    tts_startup_voice_anchor: bool
+    tts_startup_anchor_text: str
 
     stt_backend: str
     stt_url: str
@@ -111,6 +114,16 @@ class LiveTTSConfig:
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
             tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
             tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 0.45),
+            tts_session_voice_anchor=_env_bool(
+                "LIVE_TTS_SESSION_VOICE_ANCHOR", True
+            ),
+            tts_startup_voice_anchor=_env_bool(
+                "LIVE_TTS_STARTUP_VOICE_ANCHOR", True
+            ),
+            tts_startup_anchor_text=_env(
+                "LIVE_TTS_STARTUP_ANCHOR_TEXT",
+                "Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.",
+            ),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
             stt_url=_env("LIVE_TTS_STT_URL", ""),
             stt_language=_env("LIVE_TTS_STT_LANGUAGE", "it"),

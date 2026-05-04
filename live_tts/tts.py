@@ -22,6 +22,7 @@ class TTSTurnState:
     voice_prompt: Any | None = None
     anchor_text: str = ""
     anchor_duration_s: float = 0.0
+    anchor_source: str = ""
 
 
 class BaseTTS(ABC):
@@ -73,6 +74,9 @@ class OmniVoiceTTS(BaseTTS):
         self.model = None
         self.sample_rate = 24000
         self._lock = threading.Lock()
+        self._startup_voice_prompt: Any | None = None
+        self._startup_anchor_text = ""
+        self._startup_anchor_duration_s = 0.0
 
     async def start(self) -> None:
         logger.info(
@@ -81,10 +85,39 @@ class OmniVoiceTTS(BaseTTS):
             self.config.tts_device_map,
         )
         await asyncio.to_thread(self._load_model)
-        if self.config.tts_warmup_enabled:
+        if self.config.tts_startup_voice_anchor and self.config.tts_self_condition:
+            anchor_text = self.config.tts_startup_anchor_text.strip()
+            if anchor_text:
+                logger.info("omnivoice startup voice anchor text=%r", anchor_text)
+                anchor_state = TTSTurnState()
+                await self.synthesize(anchor_text, first=True, state=anchor_state)
+                if anchor_state.voice_prompt is not None:
+                    self._startup_voice_prompt = anchor_state.voice_prompt
+                    self._startup_anchor_text = anchor_state.anchor_text
+                    self._startup_anchor_duration_s = anchor_state.anchor_duration_s
+                    logger.info(
+                        "omnivoice startup voice anchor ready duration_s=%.2f chars=%s",
+                        self._startup_anchor_duration_s,
+                        len(self._startup_anchor_text),
+                    )
+        elif self.config.tts_warmup_enabled:
             logger.info("omnivoice warmup text=%r", self.config.tts_warmup_text)
             await self.synthesize(self.config.tts_warmup_text, first=True)
         logger.info("omnivoice ready sample_rate=%s", self.sample_rate)
+
+    def create_turn_state(self) -> TTSTurnState:
+        if (
+            self.config.tts_self_condition
+            and self.config.tts_session_voice_anchor
+            and self._startup_voice_prompt is not None
+        ):
+            return TTSTurnState(
+                voice_prompt=self._startup_voice_prompt,
+                anchor_text=self._startup_anchor_text,
+                anchor_duration_s=self._startup_anchor_duration_s,
+                anchor_source="startup",
+            )
+        return TTSTurnState()
 
     async def synthesize(
         self,
@@ -136,7 +169,6 @@ class OmniVoiceTTS(BaseTTS):
             self.config.tts_self_condition
             and state is not None
             and state.voice_prompt is not None
-            and not first
         )
         with self._lock:
             kwargs = {
@@ -157,7 +189,7 @@ class OmniVoiceTTS(BaseTTS):
             audio = self.model.generate(**kwargs)
 
             raw_waveform = np.asarray(audio[0], dtype=np.float32).reshape(-1)
-            self._maybe_create_anchor(state, text, raw_waveform)
+            self._maybe_create_anchor(state, text, raw_waveform, "generated")
 
         waveform = raw_waveform
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
@@ -169,6 +201,7 @@ class OmniVoiceTTS(BaseTTS):
         state: TTSTurnState | None,
         text: str,
         waveform: np.ndarray,
+        source: str,
     ) -> None:
         if not self.config.tts_self_condition or state is None:
             return
@@ -193,8 +226,10 @@ class OmniVoiceTTS(BaseTTS):
             )
             state.anchor_text = text
             state.anchor_duration_s = duration_s
+            state.anchor_source = source
             logger.info(
-                "omnivoice anchor created duration_s=%.2f chars=%s",
+                "omnivoice anchor created source=%s duration_s=%.2f chars=%s",
+                source,
                 duration_s,
                 len(text),
             )
