@@ -223,23 +223,71 @@ class OmniVoiceTTS(BaseTTS):
             )
             return
 
+        ref_text = text
+        ref_waveform = waveform.astype(np.float32, copy=False)
+        if duration_s > self.config.tts_anchor_max_seconds:
+            ref_text, ref_waveform, duration_s = self._crop_anchor_reference(
+                text,
+                ref_waveform,
+                duration_s,
+            )
+
         try:
             state.voice_prompt = self.model.create_voice_clone_prompt(
-                ref_audio=(waveform.astype(np.float32, copy=False), self.sample_rate),
-                ref_text=text,
+                ref_audio=(ref_waveform, self.sample_rate),
+                ref_text=ref_text,
                 preprocess_prompt=False,
             )
-            state.anchor_text = text
+            state.anchor_text = ref_text
             state.anchor_duration_s = duration_s
             state.anchor_source = source
             logger.info(
                 "omnivoice anchor created source=%s duration_s=%.2f chars=%s",
                 source,
                 duration_s,
-                len(text),
+                len(ref_text),
             )
         except Exception:
             logger.exception("omnivoice anchor creation failed; continuing without it")
+            self._clear_cuda_cache_after_anchor_error()
+
+    def _crop_anchor_reference(
+        self,
+        text: str,
+        waveform: np.ndarray,
+        duration_s: float,
+    ) -> tuple[str, np.ndarray, float]:
+        max_seconds = max(0.5, self.config.tts_anchor_max_seconds)
+        max_samples = min(waveform.size, int(max_seconds * self.sample_rate))
+        ref_waveform = waveform[:max_samples].astype(np.float32, copy=False)
+        ref_duration_s = ref_waveform.size / self.sample_rate
+
+        ratio = ref_duration_s / max(duration_s, 1e-6)
+        max_chars = max(24, min(len(text), int(len(text) * ratio)))
+        ref_text = text[:max_chars].rstrip()
+        cut = max(ref_text.rfind("."), ref_text.rfind(","), ref_text.rfind(" "))
+        if cut >= 24:
+            ref_text = ref_text[:cut].rstrip(" ,.")
+        if ref_text and ref_text[-1] not in ".!?":
+            ref_text += "."
+
+        logger.info(
+            "omnivoice anchor cropped original_duration_s=%.2f ref_duration_s=%.2f original_chars=%s ref_chars=%s",
+            duration_s,
+            ref_duration_s,
+            len(text),
+            len(ref_text),
+        )
+        return ref_text, ref_waveform, ref_duration_s
+
+    def _clear_cuda_cache_after_anchor_error(self) -> None:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            logger.debug("torch cuda cache cleanup failed", exc_info=True)
 
     def _voice_mode(self) -> str:
         mode = self.config.tts_voice_mode.strip().lower().replace("-", "_")

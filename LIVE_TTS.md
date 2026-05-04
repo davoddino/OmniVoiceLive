@@ -186,9 +186,10 @@ LIVE_TTS_POSTPROCESS_OUTPUT=false
 LIVE_TTS_DENOISE=true
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=1.6
+LIVE_TTS_ANCHOR_MAX_SECONDS=6.0
 LIVE_TTS_SESSION_VOICE_ANCHOR=true
 LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Ciao, questa e' una voce maschile di riferimento in italiano. Sto parlando con tono calmo, deciso e professionale, come in una conversazione reale con un consulente tecnico. CavadaLabs aiuta le aziende a usare l'intelligenza artificiale senza complicazioni, trasformando processi complessi in strumenti semplici, concreti e affidabili.
+LIVE_TTS_STARTUP_ANCHOR_TEXT=Parlo in italiano con voce maschile, calma, chiara e professionale.
 
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=

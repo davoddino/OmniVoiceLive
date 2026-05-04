@@ -134,6 +134,7 @@ class LiveTTSConfig:
     tts_warmup_text: str
     tts_self_condition: bool
     tts_anchor_min_seconds: float
+    tts_anchor_max_seconds: float
     tts_session_voice_anchor: bool
     tts_startup_voice_anchor: bool
     tts_startup_anchor_text: str
@@ -201,6 +202,7 @@ class LiveTTSConfig:
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
             tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
             tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 1.6),
+            tts_anchor_max_seconds=_env_float("LIVE_TTS_ANCHOR_MAX_SECONDS", 6.0),
             tts_session_voice_anchor=_env_bool(
                 "LIVE_TTS_SESSION_VOICE_ANCHOR", True
             ),
@@ -210,12 +212,8 @@ class LiveTTSConfig:
             tts_startup_anchor_text=_env(
                 "LIVE_TTS_STARTUP_ANCHOR_TEXT",
                 (
-                    "Ciao, questa e' una voce maschile di riferimento in italiano. "
-                    "Sto parlando con tono calmo, deciso e professionale, come in "
-                    "una conversazione reale con un consulente tecnico. CavadaLabs "
-                    "aiuta le aziende a usare l'intelligenza artificiale senza "
-                    "complicazioni, trasformando processi complessi in strumenti "
-                    "semplici, concreti e affidabili."
+                    "Parlo in italiano con voce maschile, calma, chiara e "
+                    "professionale."
                 ),
             ),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
