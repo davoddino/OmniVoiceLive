@@ -205,6 +205,28 @@ Se iPhone non apre la pagina:
 - controlla `sudo ufw status`;
 - prova da un altro PC: `curl -k https://IP_UBUNTU:8020/health`;
 - controlla che `live_tts` stia ascoltando su `0.0.0.0`, non solo su `127.0.0.1`.
+- controlla che `/health` mostri `"websocket_support": true`.
+
+Se la UI mostra `WebSocket non aperto code=1006` e nel server non compare
+`session connected`, il problema e' quasi sempre supporto WebSocket mancante in
+Uvicorn o blocco TLS/browser. Prima verifica:
+
+```bash
+uv run python -c "import websockets; print(websockets.__version__)"
+curl -k https://IP_UBUNTU:8020/health
+```
+
+Se `websockets` manca:
+
+```bash
+uv sync
+```
+
+oppure:
+
+```bash
+uv add websockets
+```
 
 Se Safari mostra warning certificato:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from importlib.util import find_spec
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
@@ -28,6 +29,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.on_event("startup")
 async def startup() -> None:
+    ensure_websocket_support()
     logger.info(
         "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s",
         config.tts_backend,
@@ -52,6 +54,7 @@ async def health() -> dict[str, object]:
         "tts_sample_rate": tts_service.sample_rate,
         "stt_backend": config.stt_backend,
         "llm_backend": config.llm_backend,
+        "websocket_support": has_websocket_support(),
     }
 
 
@@ -75,6 +78,7 @@ def main() -> None:
         raise RuntimeError(
             "Set both LIVE_TTS_SSL_CERTFILE and LIVE_TTS_SSL_KEYFILE, or neither."
         )
+    ensure_websocket_support()
 
     uvicorn_kwargs = {
         "host": config.host,
@@ -87,3 +91,16 @@ def main() -> None:
         uvicorn_kwargs["ssl_keyfile"] = config.ssl_keyfile
 
     uvicorn.run("live_tts.app:app", **uvicorn_kwargs)
+
+
+def has_websocket_support() -> bool:
+    return find_spec("websockets") is not None or find_spec("wsproto") is not None
+
+
+def ensure_websocket_support() -> None:
+    if has_websocket_support():
+        return
+    raise RuntimeError(
+        "WebSocket support is not installed. Install project dependencies again "
+        "so uvicorn can serve /ws: uv sync, or uv add websockets."
+    )

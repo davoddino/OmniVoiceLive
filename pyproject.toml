@@ -41,6 +41,7 @@ dependencies = [
     "numpy",
     "soundfile",
     "librosa",
+    "websockets>=12",
 ]
 
 [project.optional-dependencies]
