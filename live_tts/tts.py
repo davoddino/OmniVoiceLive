@@ -79,13 +79,16 @@ class OmniVoiceTTS(BaseTTS):
         self._startup_anchor_duration_s = 0.0
 
     async def start(self) -> None:
+        voice_mode = self._voice_mode()
         logger.info(
-            "omnivoice loading model=%s device_map=%s",
+            "omnivoice loading model=%s device_map=%s voice_mode=%s instruct=%r",
             self.config.tts_model,
             self.config.tts_device_map,
+            voice_mode,
+            self.config.tts_instruct,
         )
         await asyncio.to_thread(self._load_model)
-        if self.config.tts_startup_voice_anchor and self.config.tts_self_condition:
+        if voice_mode == "session_anchor" and self.config.tts_startup_voice_anchor:
             anchor_text = self.config.tts_startup_anchor_text.strip()
             if anchor_text:
                 logger.info("omnivoice startup voice anchor text=%r", anchor_text)
@@ -107,8 +110,7 @@ class OmniVoiceTTS(BaseTTS):
 
     def create_turn_state(self) -> TTSTurnState:
         if (
-            self.config.tts_self_condition
-            and self.config.tts_session_voice_anchor
+            self._voice_mode() == "session_anchor"
             and self._startup_voice_prompt is not None
         ):
             return TTSTurnState(
@@ -165,8 +167,9 @@ class OmniVoiceTTS(BaseTTS):
         num_step = (
             self.config.tts_num_step_first if first else self.config.tts_num_step_next
         )
+        voice_mode = self._voice_mode()
         use_anchor = (
-            self.config.tts_self_condition
+            voice_mode in {"turn_anchor", "session_anchor"}
             and state is not None
             and state.voice_prompt is not None
         )
@@ -189,7 +192,7 @@ class OmniVoiceTTS(BaseTTS):
             audio = self.model.generate(**kwargs)
 
             raw_waveform = np.asarray(audio[0], dtype=np.float32).reshape(-1)
-            self._maybe_create_anchor(state, text, raw_waveform, "generated")
+            self._maybe_create_anchor(state, text, raw_waveform, "generated", voice_mode)
 
         waveform = raw_waveform
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
@@ -202,8 +205,9 @@ class OmniVoiceTTS(BaseTTS):
         text: str,
         waveform: np.ndarray,
         source: str,
+        voice_mode: str,
     ) -> None:
-        if not self.config.tts_self_condition or state is None:
+        if voice_mode not in {"turn_anchor", "session_anchor"} or state is None:
             return
         if state.voice_prompt is not None:
             return
@@ -235,6 +239,18 @@ class OmniVoiceTTS(BaseTTS):
             )
         except Exception:
             logger.exception("omnivoice anchor creation failed; continuing without it")
+
+    def _voice_mode(self) -> str:
+        mode = self.config.tts_voice_mode.strip().lower().replace("-", "_")
+        if mode in {"design", "voice_design", "instruct"}:
+            return "voice_design"
+        if mode in {"turn_anchor", "self_condition", "turn_self_condition"}:
+            return "turn_anchor"
+        if mode in {"session_anchor", "anchor", "session_self_condition"}:
+            return "session_anchor"
+        raise ValueError(
+            "Unsupported LIVE_TTS_VOICE_MODE. Use voice_design, turn_anchor, or session_anchor."
+        )
 
 
 def create_tts(config: LiveTTSConfig) -> BaseTTS:

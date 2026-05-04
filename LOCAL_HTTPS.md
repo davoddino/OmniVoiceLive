@@ -161,8 +161,11 @@ curl http://127.0.0.1:8000/health
 ## 7. Avvia Live TTS In HTTPS
 
 `live_tts` carica automaticamente `.env` o `live_tts.env` dalla root della repo.
-Il file [.env.example](.env.example) contiene la configurazione Ubuntu completa.
-Una volta preparato `.env`, in un secondo terminale avvii solo:
+In questa repo c'e' gia' `live_tts.env` con la configurazione Ubuntu locale:
+OmniVoice in modalita' `voice_design`, voce `female, low pitch`, HTTPS locale,
+Whisper HTTP e LLM OpenAI-compatible.
+
+In un secondo terminale avvii solo:
 
 ```bash
 uv run python -m live_tts

@@ -66,7 +66,10 @@ class RealtimeSession:
         self.turn_counter = 0
         self.current: TurnRuntime | None = None
         self.tts_session_state: TTSTurnState | None = (
-            tts.create_turn_state() if config.tts_session_voice_anchor else None
+            tts.create_turn_state()
+            if config.tts_voice_mode.strip().lower().replace("-", "_")
+            in {"session_anchor", "anchor", "session_self_condition"}
+            else None
         )
         self.closed = False
 

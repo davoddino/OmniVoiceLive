@@ -113,6 +113,7 @@ class LiveTTSConfig:
     tts_dtype: str
     tts_language: str
     tts_instruct: str
+    tts_voice_mode: str
     tts_num_step_first: int
     tts_num_step_next: int
     tts_speed: float
@@ -167,19 +168,20 @@ class LiveTTSConfig:
             tts_dtype=_env("LIVE_TTS_DTYPE", "float16"),
             tts_language=_env("LIVE_TTS_LANGUAGE", "it"),
             tts_instruct=_env("LIVE_TTS_INSTRUCT", "female, low pitch"),
+            tts_voice_mode=_env("LIVE_TTS_VOICE_MODE", "voice_design"),
             tts_num_step_first=_env_int("LIVE_TTS_NUM_STEP_FIRST", 16),
             tts_num_step_next=_env_int("LIVE_TTS_NUM_STEP_NEXT", 24),
             tts_speed=_env_float("LIVE_TTS_SPEED", 1.05),
             tts_frame_ms=_env_int("LIVE_TTS_FRAME_MS", 40),
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono pronta."),
-            tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", True),
+            tts_self_condition=_env_bool("LIVE_TTS_SELF_CONDITION", False),
             tts_anchor_min_seconds=_env_float("LIVE_TTS_ANCHOR_MIN_SECONDS", 0.45),
             tts_session_voice_anchor=_env_bool(
-                "LIVE_TTS_SESSION_VOICE_ANCHOR", True
+                "LIVE_TTS_SESSION_VOICE_ANCHOR", False
             ),
             tts_startup_voice_anchor=_env_bool(
-                "LIVE_TTS_STARTUP_VOICE_ANCHOR", True
+                "LIVE_TTS_STARTUP_VOICE_ANCHOR", False
             ),
             tts_startup_anchor_text=_env(
                 "LIVE_TTS_STARTUP_ANCHOR_TEXT",

@@ -175,13 +175,14 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=female, low pitch
+LIVE_TTS_VOICE_MODE=voice_design
 LIVE_TTS_NUM_STEP_FIRST=16
 LIVE_TTS_NUM_STEP_NEXT=24
 LIVE_TTS_SPEED=1.05
-LIVE_TTS_SELF_CONDITION=true
+LIVE_TTS_SELF_CONDITION=false
 LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
-LIVE_TTS_SESSION_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_VOICE_ANCHOR=true
+LIVE_TTS_SESSION_VOICE_ANCHOR=false
+LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
 
 LIVE_TTS_STT_BACKEND=auto
@@ -228,31 +229,27 @@ Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 
 ## Stabilita' Del Timbro
 
-In modalita' voice-design pura, generare ogni micro-segmento in modo indipendente
-puo' cambiare il timbro tra chunk e tra risposte diverse. Per mantenere la prima
-risposta veloce senza usare una voce esterna clonata, `live_tts` usa
-self-conditioning con ancora di sessione:
+La modalita' predefinita e' `voice_design`: usa OmniVoice come `test.py`, cioe'
+`model.generate(..., instruct="female, low pitch", language="it")`, senza
+reference audio e senza `voice_clone_prompt`.
 
-1. all'avvio genera una frase breve con `instruct="female, low pitch"`;
-2. quell'audio sintetico diventa l'ancora vocale di base;
-3. ogni nuova sessione WebSocket riceve quell'ancora;
-4. tutti i chunk e tutti i turni della stessa chiamata usano la stessa voce.
+Questa e' la scelta migliore quando la voce voice-design del modello e' gia'
+piacevole in italiano. Evita la pipeline di cloning e mantiene il comportamento
+piu' vicino al test funzionante.
 
 Variabili:
 
 ```text
-LIVE_TTS_SELF_CONDITION=true
-LIVE_TTS_ANCHOR_MIN_SECONDS=0.45
-LIVE_TTS_SESSION_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_ANCHOR_TEXT=Buongiorno, sono pronta ad aiutarti. Dimmi pure di cosa hai bisogno.
+LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_INSTRUCT=female, low pitch
+LIVE_TTS_SELF_CONDITION=false
+LIVE_TTS_SESSION_VOICE_ANCHOR=false
+LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 ```
 
-Questo non richiede una voce clonata dell'utente o di una persona reale: stabilizza
-la voce auto-generata da OmniVoice a partire dal voice-design scelto. Se disattivi
-`LIVE_TTS_STARTUP_VOICE_ANCHOR`, la prima risposta creera' l'ancora durante la
-conversazione; se disattivi `LIVE_TTS_SESSION_VOICE_ANCHOR`, l'ancora torna a
-essere locale al singolo turno.
+Se in futuro vuoi tornare alla stabilizzazione tramite audio sintetico generato
+dal modello, puoi impostare `LIVE_TTS_VOICE_MODE=turn_anchor` o
+`LIVE_TTS_VOICE_MODE=session_anchor`. Di default resta disattivata.
 
 ## Barge-In Locale
 
