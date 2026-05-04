@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketDisconnect
 
 from live_tts.config import LiveTTSConfig
 from live_tts.llm import LLMStreamer
@@ -58,10 +59,48 @@ async def health() -> dict[str, object]:
     }
 
 
+@app.get("/ws-test")
+async def ws_test() -> FileResponse:
+    return FileResponse(STATIC_DIR / "ws-test.html")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    log_websocket_request(websocket, "/ws")
     session = RealtimeSession(websocket, config, stt_service, llm_streamer, tts_service)
     await session.run()
+
+
+@app.websocket("/ws-ping")
+async def websocket_ping(websocket: WebSocket) -> None:
+    log_websocket_request(websocket, "/ws-ping")
+    await websocket.accept()
+    client = websocket.client
+    logger.info(
+        "ws-ping connected client=%s",
+        f"{client.host}:{client.port}" if client else "unknown",
+    )
+    await websocket.send_json({"type": "pong", "message": "ws ok"})
+    try:
+        while True:
+            message = await websocket.receive_text()
+            logger.info("ws-ping received message=%r", message)
+            await websocket.send_json({"type": "echo", "message": message})
+    except WebSocketDisconnect:
+        logger.info("ws-ping disconnected")
+
+
+def log_websocket_request(websocket: WebSocket, path: str) -> None:
+    client = websocket.client
+    headers = websocket.headers
+    logger.info(
+        "websocket request path=%s client=%s origin=%s host=%s user_agent=%s",
+        path,
+        f"{client.host}:{client.port}" if client else "unknown",
+        headers.get("origin", "-"),
+        headers.get("host", "-"),
+        headers.get("user-agent", "-"),
+    )
 
 
 def main() -> None:
@@ -85,6 +124,8 @@ def main() -> None:
         "port": config.port,
         "reload": config.reload,
         "log_level": config.log_level.lower(),
+        "ws": "websockets",
+        "ws_ping_interval": None,
     }
     if config.ssl_certfile and config.ssl_keyfile:
         uvicorn_kwargs["ssl_certfile"] = config.ssl_certfile

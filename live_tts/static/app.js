@@ -243,12 +243,13 @@ function connectWebSocket() {
   socketOpenTimer = setTimeout(() => {
     if (socket && socket.readyState !== WebSocket.OPEN) {
       addSystemMessage(
-        `INFO: WebSocket ancora non aperto dopo 5s, readyState=${socket.readyState}.`,
+        `INFO: WebSocket ancora non aperto dopo 10s, readyState=${readyStateLabel(socket.readyState)}.`,
       );
+      addSystemMessage(`INFO: Test diagnostico: ${location.origin}/ws-test`);
       setState("error", "Errore");
       socket.close();
     }
-  }, 5000);
+  }, 10000);
 
   socket.onopen = () => {
     socketWasOpen = true;
@@ -287,14 +288,32 @@ function connectWebSocket() {
       cleanup("WebSocket non aperto");
       setState("error", "Errore");
       addSystemMessage(`INFO: WebSocket non aperto code=${event.code}${reason}.`);
+      addSystemMessage(`INFO: Apri ${location.origin}/ws-test e premi Test WebSocket.`);
     }
   };
 
   socket.onerror = () => {
-    addSystemMessage("INFO: Errore WebSocket. Controlla certificato, IP e firewall.");
+    addSystemMessage(
+      "INFO: Errore WebSocket. Controlla trust certificato iOS, IP, rete e firewall.",
+    );
     connectionLabel.textContent = "Errore";
     setState("error", "Errore");
   };
+}
+
+function readyStateLabel(value) {
+  switch (value) {
+    case WebSocket.CONNECTING:
+      return "CONNECTING";
+    case WebSocket.OPEN:
+      return "OPEN";
+    case WebSocket.CLOSING:
+      return "CLOSING";
+    case WebSocket.CLOSED:
+      return "CLOSED";
+    default:
+      return String(value);
+  }
 }
 
 async function resumeAudioContextWithTimeout(timeoutMs = 1200) {
