@@ -216,19 +216,6 @@ uv run python -c "import websockets; print(websockets.__version__)"
 curl -k https://IP_UBUNTU:8020/health
 ```
 
-Poi apri da iPhone:
-
-```text
-https://IP_UBUNTU:8020/ws-test
-```
-
-Premi `Test WebSocket`.
-
-- Se il server stampa `ws-ping connected`, il WSS funziona e il problema e' nella
-  pagina principale.
-- Se il server non stampa nulla e la pagina resta in `readyState=0` o `code=1006`,
-  il browser non completa il WSS: controlla certificato iOS, rete o proxy/router.
-
 Se `websockets` manca:
 
 ```bash
