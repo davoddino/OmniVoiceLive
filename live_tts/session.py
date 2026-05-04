@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 import uuid
@@ -24,6 +25,9 @@ from live_tts.llm import LLMStreamer
 from live_tts.segmenter import LiveTextSegmenter
 from live_tts.stt import STTService
 from live_tts.tts import BaseTTS
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -65,6 +69,12 @@ class RealtimeSession:
 
     async def run(self) -> None:
         await self.websocket.accept()
+        client = self.websocket.client
+        logger.info(
+            "session connected session_id=%s client=%s",
+            self.session_id,
+            f"{client.host}:{client.port}" if client else "unknown",
+        )
         await self.send_event(
             "session.ready",
             session_id=self.session_id,
@@ -86,6 +96,7 @@ class RealtimeSession:
         finally:
             self.closed = True
             await self.cancel_current_turn("disconnect")
+            logger.info("session closed session_id=%s", self.session_id)
 
     async def _handle_text_message(self, raw: str) -> None:
         try:
@@ -98,11 +109,22 @@ class RealtimeSession:
         if msg_type == "session.start":
             sample_rate = int(data.get("sample_rate") or 48000)
             self.detector.set_sample_rate(sample_rate)
+            logger.info(
+                "session started session_id=%s sample_rate=%s",
+                self.session_id,
+                sample_rate,
+            )
             await self.send_event("session.started", sample_rate=sample_rate)
         elif msg_type == "barge_in":
+            logger.info(
+                "barge_in received session_id=%s active_turn_id=%s",
+                self.session_id,
+                self.active_turn_id(),
+            )
             await self.cancel_current_turn("barge_in")
             self.detector.reset()
         elif msg_type == "session.stop":
+            logger.info("session stop requested session_id=%s", self.session_id)
             await self.cancel_current_turn("session_stop")
             self.closed = True
             await self.websocket.close()
@@ -117,10 +139,21 @@ class RealtimeSession:
             if event.type == "meter":
                 await self.send_event("audio.meter", rms=event.rms)
             elif event.type == "speech_start":
+                logger.info(
+                    "speech_start session_id=%s active_turn_id=%s",
+                    self.session_id,
+                    self.active_turn_id(),
+                )
                 await self.send_event("vad.speech_start", turn_id=self.active_turn_id())
                 if self.current and not self.current.cancel.is_set():
                     await self.cancel_current_turn("barge_in")
             elif event.type == "speech_end" and event.samples is not None:
+                logger.info(
+                    "speech_end session_id=%s duration_ms=%s samples=%s",
+                    self.session_id,
+                    event.duration_ms,
+                    event.samples.size,
+                )
                 await self.send_event(
                     "vad.speech_end",
                     duration_ms=event.duration_ms,
@@ -135,6 +168,13 @@ class RealtimeSession:
         cancel = threading.Event()
         runtime = TurnRuntime(turn_id=self.turn_counter, cancel=cancel)
         self.current = runtime
+        logger.info(
+            "turn queued session_id=%s turn_id=%s sample_rate=%s samples=%s",
+            self.session_id,
+            runtime.turn_id,
+            sample_rate,
+            samples.size,
+        )
         runtime.task = asyncio.create_task(
             self._process_turn(runtime, samples, sample_rate),
             name=f"live-tts-turn-{runtime.turn_id}",
@@ -146,6 +186,7 @@ class RealtimeSession:
         turn_id = runtime.turn_id
         start = time.monotonic()
         try:
+            logger.info("turn started session_id=%s turn_id=%s", self.session_id, turn_id)
             await self.send_event("turn.started", turn_id=turn_id)
             clean_samples = trim_low_amplitude_edges(
                 samples,
@@ -162,14 +203,23 @@ class RealtimeSession:
                 return
 
             user_text = str(stt_result.get("text") or "").strip()
+            stt_latency_ms = int((time.monotonic() - stt_started) * 1000)
+            logger.info(
+                "stt final session_id=%s turn_id=%s latency_ms=%s text=%r",
+                self.session_id,
+                turn_id,
+                stt_latency_ms,
+                _preview(user_text),
+            )
             await self.send_event(
                 "stt.final",
                 turn_id=turn_id,
                 text=user_text,
                 language=stt_result.get("language"),
-                latency_ms=int((time.monotonic() - stt_started) * 1000),
+                latency_ms=stt_latency_ms,
             )
             if not user_text:
+                logger.info("turn empty session_id=%s turn_id=%s", self.session_id, turn_id)
                 await self.send_event("turn.empty", turn_id=turn_id)
                 return
 
@@ -180,15 +230,28 @@ class RealtimeSession:
                 self.history = self.history[-12:]
 
             if not runtime.cancel.is_set():
+                total_latency_ms = int((time.monotonic() - start) * 1000)
+                logger.info(
+                    "assistant done session_id=%s turn_id=%s latency_ms=%s",
+                    self.session_id,
+                    turn_id,
+                    total_latency_ms,
+                )
                 await self.send_event(
                     "assistant.done",
                     turn_id=turn_id,
-                    latency_ms=int((time.monotonic() - start) * 1000),
+                    latency_ms=total_latency_ms,
                 )
         except asyncio.CancelledError:
             runtime.cancel.set()
             raise
         except Exception as exc:
+            logger.exception(
+                "turn failed session_id=%s turn_id=%s error=%s",
+                self.session_id,
+                turn_id,
+                exc,
+            )
             await self.send_event("error", turn_id=turn_id, message=str(exc))
         finally:
             if self.current is runtime:
@@ -213,8 +276,22 @@ class RealtimeSession:
                         text=piece,
                     )
                     for segment in segmenter.push(piece):
+                        logger.info(
+                            "llm segment session_id=%s turn_id=%s chars=%s text=%r",
+                            self.session_id,
+                            turn_id,
+                            len(segment),
+                            _preview(segment),
+                        )
                         await segment_queue.put(segment)
                 for segment in segmenter.flush():
+                    logger.info(
+                        "llm segment final session_id=%s turn_id=%s chars=%s text=%r",
+                        self.session_id,
+                        turn_id,
+                        len(segment),
+                        _preview(segment),
+                    )
                     await segment_queue.put(segment)
             finally:
                 await segment_queue.put(None)
@@ -229,6 +306,14 @@ class RealtimeSession:
                 if runtime.cancel.is_set() or self.current is not runtime:
                     break
 
+                logger.info(
+                    "tts start session_id=%s turn_id=%s segment_index=%s first=%s chars=%s",
+                    self.session_id,
+                    turn_id,
+                    segment_index,
+                    first,
+                    len(segment),
+                )
                 await self.send_event(
                     "assistant.audio_start",
                     turn_id=turn_id,
@@ -242,12 +327,23 @@ class RealtimeSession:
                     break
 
                 pcm = pcm16_bytes_from_float32(waveform)
+                tts_latency_ms = int((time.monotonic() - synth_started) * 1000)
+                duration_ms = int(len(waveform) / self.tts.sample_rate * 1000)
+                logger.info(
+                    "tts ready session_id=%s turn_id=%s segment_index=%s latency_ms=%s duration_ms=%s bytes=%s",
+                    self.session_id,
+                    turn_id,
+                    segment_index,
+                    tts_latency_ms,
+                    duration_ms,
+                    len(pcm),
+                )
                 await self.send_event(
                     "assistant.audio_ready",
                     turn_id=turn_id,
                     segment_index=segment_index,
-                    duration_ms=int(len(waveform) / self.tts.sample_rate * 1000),
-                    latency_ms=int((time.monotonic() - synth_started) * 1000),
+                    duration_ms=duration_ms,
+                    latency_ms=tts_latency_ms,
                 )
                 for frame in iter_pcm_frames(
                     pcm, self.tts.sample_rate, self.config.tts_frame_ms
@@ -280,6 +376,12 @@ class RealtimeSession:
         if runtime is None:
             return
         runtime.cancel.set()
+        logger.info(
+            "turn cancelled session_id=%s turn_id=%s reason=%s",
+            self.session_id,
+            runtime.turn_id,
+            reason,
+        )
         if runtime.task and not runtime.task.done():
             runtime.task.cancel()
         await self.send_event(
@@ -309,3 +411,10 @@ class RealtimeSession:
                 await self.websocket.send_bytes(payload)
             except RuntimeError:
                 self.closed = True
+
+
+def _preview(text: str, limit: int = 120) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "..."

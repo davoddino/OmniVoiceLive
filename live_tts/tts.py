@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import threading
 from abc import ABC, abstractmethod
@@ -9,6 +10,9 @@ import numpy as np
 
 from live_tts.audio import apply_edge_fade, trim_low_amplitude_edges
 from live_tts.config import LiveTTSConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 class BaseTTS(ABC):
@@ -49,9 +53,12 @@ class OmniVoiceTTS(BaseTTS):
         self._lock = threading.Lock()
 
     async def start(self) -> None:
+        logger.info("omnivoice loading model=%s device_map=%s", self.config.tts_model, self.config.tts_device_map)
         await asyncio.to_thread(self._load_model)
         if self.config.tts_warmup_enabled:
+            logger.info("omnivoice warmup text=%r", self.config.tts_warmup_text)
             await self.synthesize(self.config.tts_warmup_text, first=True)
+        logger.info("omnivoice ready sample_rate=%s", self.sample_rate)
 
     async def synthesize(self, text: str, first: bool) -> np.ndarray:
         return await asyncio.to_thread(self._synthesize_sync, text, first)
@@ -69,6 +76,7 @@ class OmniVoiceTTS(BaseTTS):
             dtype=dtype,
         )
         self.sample_rate = int(self.model.sampling_rate or 24000)
+        logger.info("omnivoice model loaded sample_rate=%s", self.sample_rate)
 
     def _resolve_dtype(self, torch_module):
         value = self.config.tts_dtype.strip().lower()

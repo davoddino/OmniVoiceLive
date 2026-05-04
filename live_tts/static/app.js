@@ -15,6 +15,10 @@ let recorderNode = null;
 let playerNode = null;
 let mediaStream = null;
 let ttsSampleRate = 24000;
+let fallbackPlayerQueue = [];
+let fallbackPlayerOffset = 0;
+let fallbackQueuedSamples = 0;
+let fallbackBufferLastAt = 0;
 let activeAssistantMessage = null;
 let assistantSpeaking = false;
 let bargeSent = false;
@@ -34,17 +38,11 @@ async function startCall() {
     setState("connecting", "Connessione");
     startButton.disabled = true;
 
-    audioContext = new AudioContext({ latencyHint: "interactive" });
-    await audioContext.audioWorklet.addModule("/static/recorder-worklet.js");
-    await audioContext.audioWorklet.addModule("/static/player-worklet.js");
-
-    playerNode = new AudioWorkletNode(audioContext, "player-worklet");
-    playerNode.connect(audioContext.destination);
-    playerNode.port.onmessage = (event) => {
-      if (event.data.type === "buffer") {
-        bufferLabel.textContent = `${event.data.ms} ms`;
-      }
-    };
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      throw new Error("Web Audio API non disponibile in questo browser.");
+    }
+    audioContext = new AudioContextClass({ latencyHint: "interactive" });
 
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -55,9 +53,22 @@ async function startCall() {
       },
     });
     const source = audioContext.createMediaStreamSource(mediaStream);
-    recorderNode = new AudioWorkletNode(audioContext, "recorder-worklet");
-    source.connect(recorderNode);
-    recorderNode.port.onmessage = onMicFrame;
+
+    const canUseWorklet = Boolean(audioContext.audioWorklet && window.AudioWorkletNode);
+    if (canUseWorklet) {
+      try {
+        await setupAudioWorkletGraph(source);
+        addSystemMessage("INFO: AudioWorklet attivo.");
+      } catch (error) {
+        addSystemMessage(
+          `INFO: AudioWorklet non disponibile, uso fallback iOS. Dettaglio: ${error.message}`,
+        );
+        setupScriptProcessorGraph(source);
+      }
+    } else {
+      addSystemMessage("INFO: AudioWorklet non disponibile, uso fallback iOS.");
+      setupScriptProcessorGraph(source);
+    }
 
     await audioContext.resume();
 
@@ -96,7 +107,21 @@ function stopCall() {
 
 function cleanup(label) {
   if (playerNode) {
-    playerNode.port.postMessage({ type: "clear" });
+    clearPlayer();
+  }
+  if (recorderNode) {
+    try {
+      recorderNode.disconnect();
+    } catch (_error) {
+      // Already disconnected.
+    }
+  }
+  if (playerNode) {
+    try {
+      playerNode.disconnect();
+    } catch (_error) {
+      // Already disconnected.
+    }
   }
   if (mediaStream) {
     for (const track of mediaStream.getTracks()) {
@@ -106,14 +131,17 @@ function cleanup(label) {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.close();
   }
-  if (audioContext) {
-    audioContext.close();
+  if (audioContext && audioContext.state !== "closed") {
+    audioContext.close().catch(() => {});
   }
   socket = null;
   audioContext = null;
   mediaStream = null;
   recorderNode = null;
   playerNode = null;
+  fallbackPlayerQueue = [];
+  fallbackPlayerOffset = 0;
+  fallbackQueuedSamples = 0;
   assistantSpeaking = false;
   bargeSent = false;
   startButton.disabled = false;
@@ -129,6 +157,43 @@ function onMicFrame(event) {
     return;
   }
   socket.send(frame.buffer);
+}
+
+async function setupAudioWorkletGraph(source) {
+  await audioContext.audioWorklet.addModule("/static/recorder-worklet.js");
+  await audioContext.audioWorklet.addModule("/static/player-worklet.js");
+
+  playerNode = new AudioWorkletNode(audioContext, "player-worklet");
+  playerNode.connect(audioContext.destination);
+  playerNode.port.onmessage = (event) => {
+    if (event.data.type === "buffer") {
+      bufferLabel.textContent = `${event.data.ms} ms`;
+    }
+  };
+
+  recorderNode = new AudioWorkletNode(audioContext, "recorder-worklet");
+  source.connect(recorderNode);
+  recorderNode.port.onmessage = onMicFrame;
+}
+
+function setupScriptProcessorGraph(source) {
+  playerNode = audioContext.createScriptProcessor(1024, 0, 1);
+  playerNode.onaudioprocess = onFallbackPlayerProcess;
+  playerNode.connect(audioContext.destination);
+
+  recorderNode = audioContext.createScriptProcessor(2048, 1, 1);
+  recorderNode.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    const frame = new Float32Array(input.length);
+    frame.set(input);
+
+    const output = event.outputBuffer.getChannelData(0);
+    output.fill(0);
+
+    onMicFrame({ data: frame });
+  };
+  source.connect(recorderNode);
+  recorderNode.connect(audioContext.destination);
 }
 
 function updateClientVad(frame) {
@@ -243,16 +308,67 @@ function enqueueAudio(arrayBuffer) {
     floats[i] = Math.max(-1, Math.min(1, pcm[i] / 32768));
   }
   const resampled = resampleLinear(floats, ttsSampleRate, audioContext.sampleRate);
-  playerNode.port.postMessage(
-    { type: "audio", samples: resampled.buffer },
-    [resampled.buffer],
-  );
+  enqueuePlayerSamples(resampled);
 }
 
 function clearPlayer() {
-  if (playerNode) {
+  if (playerNode && playerNode.port) {
     playerNode.port.postMessage({ type: "clear" });
   }
+  fallbackPlayerQueue = [];
+  fallbackPlayerOffset = 0;
+  fallbackQueuedSamples = 0;
+  bufferLabel.textContent = "0 ms";
+}
+
+function enqueuePlayerSamples(samples) {
+  if (playerNode && playerNode.port) {
+    playerNode.port.postMessage(
+      { type: "audio", samples: samples.buffer },
+      [samples.buffer],
+    );
+    return;
+  }
+
+  fallbackPlayerQueue.push(samples);
+  fallbackQueuedSamples += samples.length;
+  updateFallbackBufferLabel();
+}
+
+function onFallbackPlayerProcess(event) {
+  const output = event.outputBuffer.getChannelData(0);
+  for (let i = 0; i < output.length; i += 1) {
+    if (fallbackPlayerQueue.length === 0) {
+      output[i] = 0;
+      continue;
+    }
+
+    const head = fallbackPlayerQueue[0];
+    output[i] = head[fallbackPlayerOffset] || 0;
+    fallbackPlayerOffset += 1;
+    fallbackQueuedSamples = Math.max(0, fallbackQueuedSamples - 1);
+
+    if (fallbackPlayerOffset >= head.length) {
+      fallbackPlayerQueue.shift();
+      fallbackPlayerOffset = 0;
+    }
+  }
+
+  const now = performance.now();
+  if (now - fallbackBufferLastAt > 100) {
+    fallbackBufferLastAt = now;
+    updateFallbackBufferLabel();
+  }
+}
+
+function updateFallbackBufferLabel() {
+  if (!audioContext) {
+    bufferLabel.textContent = "0 ms";
+    return;
+  }
+  bufferLabel.textContent = `${Math.round(
+    (fallbackQueuedSamples / audioContext.sampleRate) * 1000,
+  )} ms`;
 }
 
 function resampleLinear(input, fromRate, toRate) {

@@ -47,6 +47,9 @@ class LiveTTSConfig:
     host: str
     port: int
     reload: bool
+    log_level: str
+    ssl_certfile: str
+    ssl_keyfile: str
 
     tts_backend: str
     tts_model: str
@@ -89,6 +92,9 @@ class LiveTTSConfig:
             host=_env("LIVE_TTS_HOST", "0.0.0.0"),
             port=_env_int("LIVE_TTS_PORT", 8020),
             reload=_env_bool("LIVE_TTS_RELOAD", False),
+            log_level=_env("LIVE_TTS_LOG_LEVEL", "info"),
+            ssl_certfile=_env("LIVE_TTS_SSL_CERTFILE", ""),
+            ssl_keyfile=_env("LIVE_TTS_SSL_KEYFILE", ""),
             tts_backend=_env("LIVE_TTS_TTS_BACKEND", "omnivoice"),
             tts_model=_env("LIVE_TTS_MODEL", "k2-fsa/OmniVoice"),
             tts_device_map=_env("LIVE_TTS_DEVICE_MAP", "cuda:0"),

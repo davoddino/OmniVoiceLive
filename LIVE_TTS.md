@@ -163,6 +163,9 @@ Le variabili principali:
 ```text
 LIVE_TTS_HOST=0.0.0.0
 LIVE_TTS_PORT=8020
+LIVE_TTS_LOG_LEVEL=info
+LIVE_TTS_SSL_CERTFILE=
+LIVE_TTS_SSL_KEYFILE=
 LIVE_TTS_TTS_BACKEND=omnivoice
 LIVE_TTS_MODEL=k2-fsa/OmniVoice
 LIVE_TTS_DEVICE_MAP=cuda:0
@@ -206,6 +209,7 @@ http://127.0.0.1:8020
 
 Per microfono e autoplay in produzione va servito dietro HTTPS. In locale i browser
 accettano normalmente `localhost`/`127.0.0.1` come secure context per il microfono.
+Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 
 ## Hardening Per Produzione
 
