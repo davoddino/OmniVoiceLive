@@ -1,45 +1,66 @@
-# HTTPS Locale Per iPhone
+# HTTPS Locale Su Ubuntu Per iPhone
 
-Questa guida crea un certificato locale valido per aprire OmniVoice Live da iPhone:
+Questa guida serve per avviare OmniVoice Live su Ubuntu e aprirlo da iPhone:
 
 ```text
-https://IP_DEL_MAC:8020
+https://IP_UBUNTU:8020
 ```
 
-Il microfono su iPhone richiede HTTPS con un certificato considerato affidabile.
-Per un test locale la strada piu' pulita e' `mkcert`, perche' crea una root CA locale
-che puoi installare anche su iPhone.
+Su iPhone microfono e autoplay richiedono HTTPS. Per una demo locale in LAN usiamo
+`mkcert`, che crea una root CA locale da installare anche su iPhone.
 
-## 1. Installa mkcert Sul Mac
+## 1. Installa mkcert Su Ubuntu
+
+Prova prima con `apt`:
 
 ```bash
-brew install mkcert
+sudo apt update
+sudo apt install -y mkcert libnss3-tools
 mkcert -install
 ```
 
-## 2. Trova L'IP LAN Del Mac
-
-Su Wi-Fi di solito:
-
-```bash
-ipconfig getifaddr en0
-```
-
-Su Ethernet potrebbe essere:
+Se `apt` non trova `mkcert`, installa almeno `libnss3-tools` e poi installa `mkcert`
+dal pacchetto/release adatto alla tua macchina:
 
 ```bash
-ipconfig getifaddr en1
+sudo apt update
+sudo apt install -y libnss3-tools curl ca-certificates
 ```
 
-Esempio:
+Poi usa il binario Linux corretto per la tua architettura e mettilo in
+`/usr/local/bin/mkcert`. Su server x86_64 di solito e' `linux-amd64`.
+
+Verifica:
+
+```bash
+mkcert -version
+```
+
+## 2. Trova L'IP LAN Di Ubuntu
+
+Metodo rapido:
+
+```bash
+hostname -I
+```
+
+Prendi l'IP della rete Wi-Fi/LAN, per esempio:
 
 ```text
 192.168.1.50
 ```
 
+Metodo piu' esplicito:
+
+```bash
+ip addr
+```
+
+L'iPhone deve essere sulla stessa rete.
+
 ## 3. Crea Il Certificato Server
 
-Sostituisci `192.168.1.50` con l'IP reale del Mac.
+Sostituisci `192.168.1.50` con l'IP reale di Ubuntu:
 
 ```bash
 mkdir -p certs
@@ -47,33 +68,80 @@ mkdir -p certs
 mkcert \
   -cert-file certs/live_tts.pem \
   -key-file certs/live_tts-key.pem \
-  localhost 127.0.0.1 192.168.1.50 "$(hostname).local"
+  localhost 127.0.0.1 192.168.1.50
 ```
 
-Il certificato deve includere l'IP che userai da iPhone. Se l'IP cambia, ricrea il
-certificato.
+Se userai anche un hostname locale, aggiungilo nello stesso comando, per esempio:
+
+```bash
+mkcert \
+  -cert-file certs/live_tts.pem \
+  -key-file certs/live_tts-key.pem \
+  localhost 127.0.0.1 192.168.1.50 ubuntu-live.local
+```
+
+Il certificato deve includere esattamente l'IP o hostname che aprirai da iPhone.
+Se l'IP cambia, ricrea il certificato.
 
 ## 4. Installa La Root CA Su iPhone
 
-Trova la root CA creata da `mkcert`:
+Trova la cartella della root CA:
 
 ```bash
 mkcert -CAROOT
 ```
 
-Dentro quella cartella c'e' `rootCA.pem`. Invia **solo** `rootCA.pem` all'iPhone
-via AirDrop, email o Files. Non inviare mai `live_tts-key.pem`.
+Dentro quella cartella c'e' `rootCA.pem`.
 
-Su iPhone:
+Invia **solo** `rootCA.pem` all'iPhone. Non inviare mai
+`certs/live_tts-key.pem`.
 
-1. Apri il file `rootCA.pem` e installa il profilo.
-2. Vai in `Impostazioni`.
-3. Apri `Generali`.
-4. Apri `VPN e gestione dispositivo` e installa il profilo, se richiesto.
-5. Vai in `Generali` -> `Info` -> `Impostazioni attendibilita certificati`.
-6. Abilita la fiducia completa per la root CA di `mkcert`.
+Opzione comoda da Ubuntu: servi temporaneamente la cartella della CA in HTTP sulla LAN.
+Sostituisci `192.168.1.50` con l'IP reale.
 
-## 5. Avvia Whisper
+```bash
+cd "$(mkcert -CAROOT)"
+python3 -m http.server 8088 --bind 0.0.0.0
+```
+
+Da iPhone apri:
+
+```text
+http://192.168.1.50:8088/rootCA.pem
+```
+
+Installa il profilo. Poi su iPhone:
+
+1. Apri `Impostazioni`.
+2. Vai in `Generali`.
+3. Apri `VPN e gestione dispositivo` e installa il profilo, se richiesto.
+4. Vai in `Generali` -> `Info` -> `Impostazioni attendibilita certificati`.
+5. Abilita la fiducia completa per la root CA di `mkcert`.
+
+Dopo aver installato la CA, ferma il server temporaneo con `CTRL+C`.
+
+## 5. Apri Il Firewall Ubuntu
+
+Se usi `ufw`:
+
+```bash
+sudo ufw allow 8020/tcp
+sudo ufw status
+```
+
+Se vuoi scaricare la root CA da iPhone con il server temporaneo sopra:
+
+```bash
+sudo ufw allow 8088/tcp
+```
+
+Puoi rimuovere la regola 8088 dopo l'installazione della CA:
+
+```bash
+sudo ufw delete allow 8088/tcp
+```
+
+## 6. Avvia Whisper
 
 In un terminale:
 
@@ -81,12 +149,18 @@ In un terminale:
 uv run uvicorn whisper:app --host 127.0.0.1 --port 8000
 ```
 
-Whisper puo' restare HTTP su localhost, perche' viene chiamato dal backend
-`live_tts`, non direttamente dall'iPhone.
+Whisper resta HTTP su localhost perche' viene chiamato dal backend `live_tts`, non
+direttamente dall'iPhone.
 
-## 6. Avvia Live TTS In HTTPS
+Verifica da Ubuntu:
 
-Sostituisci `192.168.1.50` con l'IP reale del Mac.
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+## 7. Avvia Live TTS In HTTPS
+
+In un secondo terminale, dalla root della repo:
 
 ```bash
 LIVE_TTS_HOST=0.0.0.0 \
@@ -108,31 +182,52 @@ LIVE_TTS_INSTRUCT="female, low pitch" \
 uv run python -m live_tts
 ```
 
-Apri da iPhone:
+Da Ubuntu verifica:
+
+```bash
+curl -k https://127.0.0.1:8020/health
+curl -k https://192.168.1.50:8020/health
+```
+
+Da iPhone apri:
 
 ```text
 https://192.168.1.50:8020
 ```
 
-## 7. Debug Rapido
+## 8. Debug Rapido
 
-Dal Mac:
+Se iPhone non apre la pagina:
 
-```bash
-curl -k https://127.0.0.1:8020/health
+- controlla che iPhone e Ubuntu siano sulla stessa rete;
+- usa `https://`, non `http://`;
+- controlla che l'IP nell'URL sia incluso nel certificato;
+- controlla `sudo ufw status`;
+- prova da un altro PC: `curl -k https://IP_UBUNTU:8020/health`;
+- controlla che `live_tts` stia ascoltando su `0.0.0.0`, non solo su `127.0.0.1`.
+
+Se Safari mostra warning certificato:
+
+- la root CA non e' installata;
+- oppure non e' stata abilitata in `Impostazioni attendibilita certificati`;
+- oppure hai ricreato i certificati e devi reinstallare la nuova root CA.
+
+Se il microfono non parte:
+
+- assicurati di essere su HTTPS;
+- consenti il microfono a Safari;
+- ricarica la pagina;
+- guarda il messaggio `SISTEMA` nella UI. Su iPhone puo' comparire:
+
+```text
+INFO: AudioWorklet non disponibile, uso fallback iOS.
 ```
 
-Da iPhone:
-
-- deve essere sulla stessa rete Wi-Fi del Mac;
-- devi usare `https://`, non `http://`;
-- l'IP nell'URL deve essere incluso nel certificato;
-- macOS Firewall deve permettere connessioni in ingresso a Python/Uvicorn;
-- se Safari mostra warning certificato, la root CA non e' stata fidata
-  completamente su iPhone.
+Questo e' previsto: il frontend usa un fallback compatibile quando Safari non
+espone `AudioWorklet`.
 
 ## Note Di Produzione
 
-Per clienti veri e accesso fuori dalla LAN, usa un dominio reale e un certificato
-pubblico, oppure termina TLS su un reverse proxy. Il certificato `mkcert` serve solo
-per sviluppo locale e demo in rete privata.
+`mkcert` serve solo per sviluppo locale e demo in rete privata. Per clienti veri
+usa un dominio reale e certificati pubblici, oppure termina TLS su un reverse proxy
+come Nginx, Caddy o Traefik.
