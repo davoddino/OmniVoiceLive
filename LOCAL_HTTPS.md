@@ -186,7 +186,7 @@ Da Ubuntu verifica:
 
 ```bash
 curl -k https://127.0.0.1:8020/health
-curl -k https://192.168.1.50:8020/health
+curl -k https://192.168.0.20:8020/health
 ```
 
 Da iPhone apri:
