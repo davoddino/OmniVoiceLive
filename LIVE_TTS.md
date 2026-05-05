@@ -146,8 +146,8 @@ sprecata rimane controllato.
 
 Configurazione prevista:
 
-- primo segmento: 160-420 caratteri circa;
-- segmenti successivi: 420-900 caratteri circa;
+- primo segmento: 280-900 caratteri circa;
+- segmenti successivi: 900-1800 caratteri circa;
 - `num_step` primo segmento: 40;
 - `num_step` successivi: 40 di default;
 - meno segmenti possibili per ridurre i reset vocali tra chunk;
@@ -203,15 +203,19 @@ LIVE_TTS_LLM_MODEL=qwen3.6-35b
 LIVE_TTS_SYSTEM_PROMPT_FILE=live_tts/prompts/cavadalabs_voice.md
 LIVE_TTS_LLM_TEMPERATURE=0.3
 
-LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=160
-LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=420
-LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=420
-LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=900
+LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=280
+LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=900
+LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=900
+LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=1800
 
-LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
-LIVE_TTS_CLIENT_BARGE_STOP_MS=20
-LIVE_TTS_CLIENT_BARGE_COMMIT_MS=45
-LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=700
+LIVE_TTS_VAD_THRESHOLD=0.020
+LIVE_TTS_VAD_START_MS=220
+LIVE_TTS_VAD_END_MS=750
+
+LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.022
+LIVE_TTS_CLIENT_BARGE_STOP_MS=80
+LIVE_TTS_CLIENT_BARGE_COMMIT_MS=140
+LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=900
 ```
 
 La lingua della conversazione si sceglie dall'interfaccia prima di avviare la
@@ -285,15 +289,15 @@ anche `barge_in` al server e scarta eventuali frame audio vecchi arrivati in
 ritardo.
 
 ```text
-LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.012
-LIVE_TTS_CLIENT_BARGE_STOP_MS=20
-LIVE_TTS_CLIENT_BARGE_COMMIT_MS=45
-LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=700
+LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.022
+LIVE_TTS_CLIENT_BARGE_STOP_MS=80
+LIVE_TTS_CLIENT_BARGE_COMMIT_MS=140
+LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=900
 ```
 
 Se si interrompe troppo facilmente per eco dagli speaker, alza
-`LIVE_TTS_CLIENT_BARGE_THRESHOLD` a `0.016` o `0.018`. Se invece non interrompe
-abbastanza rapidamente, scendi verso `0.009`.
+`LIVE_TTS_CLIENT_BARGE_THRESHOLD` a `0.026` o `0.030`. Se invece non interrompe
+abbastanza rapidamente, scendi verso `0.018`.
 
 ## Hardening Per Produzione
 

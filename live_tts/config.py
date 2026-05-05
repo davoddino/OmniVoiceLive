@@ -234,22 +234,22 @@ class LiveTTSConfig:
             llm_top_p=_env_float("LIVE_TTS_LLM_TOP_P", 1.0),
             llm_timeout_s=_env_float("LIVE_TTS_LLM_TIMEOUT_S", 120.0),
             system_prompt=_configured_system_prompt(),
-            segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 160),
-            segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 420),
-            segment_min_next_chars=_env_int("LIVE_TTS_SEGMENT_MIN_NEXT_CHARS", 420),
-            segment_max_next_chars=_env_int("LIVE_TTS_SEGMENT_MAX_NEXT_CHARS", 900),
-            vad_speech_threshold=_env_float("LIVE_TTS_VAD_THRESHOLD", 0.014),
-            vad_start_ms=_env_int("LIVE_TTS_VAD_START_MS", 140),
-            vad_end_ms=_env_int("LIVE_TTS_VAD_END_MS", 650),
+            segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 280),
+            segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 900),
+            segment_min_next_chars=_env_int("LIVE_TTS_SEGMENT_MIN_NEXT_CHARS", 900),
+            segment_max_next_chars=_env_int("LIVE_TTS_SEGMENT_MAX_NEXT_CHARS", 1800),
+            vad_speech_threshold=_env_float("LIVE_TTS_VAD_THRESHOLD", 0.020),
+            vad_start_ms=_env_int("LIVE_TTS_VAD_START_MS", 220),
+            vad_end_ms=_env_int("LIVE_TTS_VAD_END_MS", 750),
             vad_min_turn_ms=_env_int("LIVE_TTS_VAD_MIN_TURN_MS", 320),
             vad_preroll_ms=_env_int("LIVE_TTS_VAD_PREROLL_MS", 220),
             vad_max_turn_s=_env_float("LIVE_TTS_VAD_MAX_TURN_S", 18.0),
             client_barge_threshold=_env_float(
-                "LIVE_TTS_CLIENT_BARGE_THRESHOLD", 0.012
+                "LIVE_TTS_CLIENT_BARGE_THRESHOLD", 0.022
             ),
-            client_barge_stop_ms=_env_int("LIVE_TTS_CLIENT_BARGE_STOP_MS", 20),
-            client_barge_commit_ms=_env_int("LIVE_TTS_CLIENT_BARGE_COMMIT_MS", 45),
+            client_barge_stop_ms=_env_int("LIVE_TTS_CLIENT_BARGE_STOP_MS", 80),
+            client_barge_commit_ms=_env_int("LIVE_TTS_CLIENT_BARGE_COMMIT_MS", 140),
             client_barge_cooldown_ms=_env_int(
-                "LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS", 700
+                "LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS", 900
             ),
         )

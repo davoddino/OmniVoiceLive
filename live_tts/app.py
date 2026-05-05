@@ -31,7 +31,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def startup() -> None:
     ensure_websocket_support()
     logger.info(
-        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s instruct=%r num_step=%s/%s speed=%.2f segments=%s-%s/%s-%s client_barge_threshold=%.4f",
+        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s instruct=%r num_step=%s/%s speed=%.2f segments=%s-%s/%s-%s vad_threshold=%.4f client_barge_threshold=%.4f",
         config.tts_backend,
         config.stt_backend,
         config.llm_backend,
@@ -45,6 +45,7 @@ async def startup() -> None:
         config.segment_max_first_chars,
         config.segment_min_next_chars,
         config.segment_max_next_chars,
+        config.vad_speech_threshold,
         config.client_barge_threshold,
     )
     await tts_service.start()
@@ -75,6 +76,9 @@ async def health() -> dict[str, object]:
         "segment_max_first_chars": config.segment_max_first_chars,
         "segment_min_next_chars": config.segment_min_next_chars,
         "segment_max_next_chars": config.segment_max_next_chars,
+        "vad_speech_threshold": config.vad_speech_threshold,
+        "vad_start_ms": config.vad_start_ms,
+        "vad_end_ms": config.vad_end_ms,
         "websocket_support": has_websocket_support(),
         "client_barge_threshold": config.client_barge_threshold,
         "client_barge_stop_ms": config.client_barge_stop_ms,
