@@ -6,7 +6,7 @@
 #
 # To preinstall manually:
 #   uv venv .live_tts_workers/qwen3_tts/.venv
-#   .live_tts_workers/qwen3_tts/.venv/bin/python -m pip install -r more_requirement.txt
+#   uv pip install --python .live_tts_workers/qwen3_tts/.venv/bin/python -r more_requirement.txt
 #
 # Qwen3-TTS currently has a transformers dependency conflict in the published
 # qwen-tts package. Keeping it isolated prevents it from downgrading the main

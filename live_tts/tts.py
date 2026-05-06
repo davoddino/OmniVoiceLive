@@ -550,8 +550,11 @@ class Qwen3TTS(BaseTTS):
             str(worker_python),
             "-c",
             (
-                "from live_tts.qwen_worker import install_transformers_compat_shim; "
-                "install_transformers_compat_shim(); "
+                "from transformers.utils import generic; "
+                "generic.check_model_inputs = getattr("
+                "generic, 'check_model_inputs', lambda *a, **k: "
+                "(a[0] if len(a) == 1 and callable(a[0]) and not k "
+                "else (lambda f: f))); "
                 "from qwen_tts import Qwen3TTSModel; "
                 "print('ok')"
             ),
@@ -565,7 +568,15 @@ class Qwen3TTS(BaseTTS):
 
         logger.info("qwen3_tts installing worker requirements=%s", requirements)
         subprocess.run(
-            [str(worker_python), "-m", "pip", "install", "-r", str(requirements)],
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(worker_python),
+                "-r",
+                str(requirements),
+            ],
             check=True,
         )
         subprocess.run(import_check, check=True, env=self._worker_env())

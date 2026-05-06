@@ -341,7 +341,7 @@ Per preinstallare manualmente il worker Qwen:
 
 ```bash
 uv venv .live_tts_workers/qwen3_tts/.venv
-.live_tts_workers/qwen3_tts/.venv/bin/python -m pip install -r more_requirement.txt
+uv pip install --python .live_tts_workers/qwen3_tts/.venv/bin/python -r more_requirement.txt
 ```
 
 Qwen3-TTS usa di default il modello `0.6B-CustomVoice` per ridurre il rischio di
