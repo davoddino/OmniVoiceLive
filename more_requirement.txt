@@ -1,13 +1,22 @@
-# Optional TTS engines used by the in-app engine selector.
+# Optional dependencies for the auto-managed Qwen3-TTS worker.
 #
-# Install only when you want to test Qwen3-TTS:
-#   uv pip install -r more_requirement.txt
+# Do not install this file into the main OmniVoice environment. The live_tts
+# server creates an isolated worker environment under:
+#   .live_tts_workers/qwen3_tts
 #
-# FlashAttention is recommended by Qwen3-TTS on compatible CUDA GPUs, but it is
-# intentionally not pinned here because installation depends on your local CUDA,
-# torch and compiler setup.
-qwen-tts
-
-# CTC-TTS is integrated as an external HTTP worker through LIVE_TTS_CTC_URL.
-# No client-side package is required in this repo until an official runtime is
-# available.
+# To preinstall manually:
+#   uv venv .live_tts_workers/qwen3_tts/.venv
+#   .live_tts_workers/qwen3_tts/.venv/bin/python -m pip install -r more_requirement.txt
+#
+# Qwen3-TTS currently has a transformers dependency conflict in the published
+# qwen-tts package. Keeping it isolated prevents it from downgrading the main
+# OmniVoice environment.
+qwen-tts==0.1.1
+transformers>=5.0.0
+accelerate
+einops
+sox
+soundfile
+requests
+fastapi
+uvicorn[standard]

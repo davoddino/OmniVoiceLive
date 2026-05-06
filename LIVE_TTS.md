@@ -214,6 +214,15 @@ LIVE_TTS_QWEN_INSTRUCT=Speak in Italian with a warm, confident, lively call-cent
 LIVE_TTS_QWEN_DEVICE_MAP=cuda:0
 LIVE_TTS_QWEN_DTYPE=bfloat16
 LIVE_TTS_QWEN_ATTN_IMPLEMENTATION=
+LIVE_TTS_QWEN_URL=
+LIVE_TTS_QWEN_AUTO_START=true
+LIVE_TTS_QWEN_WORKER_HOST=127.0.0.1
+LIVE_TTS_QWEN_WORKER_PORT=8031
+LIVE_TTS_QWEN_WORKER_DIR=.live_tts_workers/qwen3_tts
+LIVE_TTS_QWEN_WORKER_PYTHON=
+LIVE_TTS_QWEN_WORKER_INSTALL=true
+LIVE_TTS_QWEN_WORKER_START_TIMEOUT_S=900
+LIVE_TTS_QWEN_WORKER_REQUEST_TIMEOUT_S=120
 
 LIVE_TTS_CTC_URL=
 LIVE_TTS_CTC_VOICE=default
@@ -310,23 +319,29 @@ Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 ## Selettore Engine TTS
 
 L'interfaccia espone un selettore per confrontare engine diversi mantenendo uguali
-STT, LLM, prompt, segmenter, VAD, barge-in e player. Il server carica un solo
-engine alla volta in GPU:
+STT, LLM, prompt, segmenter, VAD, barge-in e player. Il server mantiene un solo
+engine attivo alla volta:
 
 - `OmniVoice`: default, caricato all'avvio.
-- `Qwen3-TTS`: opzionale, caricato solo quando selezionato.
+- `Qwen3-TTS`: opzionale, avviato in un worker isolato solo quando selezionato.
 - `CTC-TTS`: worker HTTP esterno sperimentale.
 - `Mock`: test di trasporto senza GPU.
 
 Quando cambi engine, il turno corrente viene cancellato, il modello precedente
-viene scaricato, la GPU viene liberata e l'interfaccia mostra `loading`, `ready`
-o `failed`. L'audio del microfono viene messo in pausa durante il caricamento e
-riparte quando l'engine e' pronto.
+viene scaricato o il worker viene terminato, la GPU viene liberata e l'interfaccia
+mostra `loading`, `ready` o `failed`. L'audio del microfono viene messo in pausa
+durante il caricamento e riparte quando l'engine e' pronto.
 
-Le dipendenze dei nuovi modelli stanno in un file separato:
+Qwen non viene installato nella venv principale. Il server crea automaticamente
+una venv isolata sotto `.live_tts_workers/qwen3_tts` e installa le dipendenze da
+`more_requirement.txt` al primo uso. Questo evita il conflitto tra `qwen-tts` e
+le versioni `transformers` richieste da OmniVoice.
+
+Per preinstallare manualmente il worker Qwen:
 
 ```bash
-uv pip install -r more_requirement.txt
+uv venv .live_tts_workers/qwen3_tts/.venv
+.live_tts_workers/qwen3_tts/.venv/bin/python -m pip install -r more_requirement.txt
 ```
 
 Qwen3-TTS usa di default il modello `0.6B-CustomVoice` per ridurre il rischio di

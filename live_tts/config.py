@@ -192,6 +192,15 @@ class LiveTTSConfig:
     qwen_tts_device_map: str
     qwen_tts_dtype: str
     qwen_tts_attn_implementation: str
+    qwen_tts_url: str
+    qwen_tts_auto_start: bool
+    qwen_tts_worker_host: str
+    qwen_tts_worker_port: int
+    qwen_tts_worker_dir: str
+    qwen_tts_worker_python: str
+    qwen_tts_worker_install: bool
+    qwen_tts_worker_start_timeout_s: float
+    qwen_tts_worker_request_timeout_s: float
 
     ctc_tts_url: str
     ctc_tts_voice: str
@@ -339,6 +348,21 @@ class LiveTTSConfig:
             qwen_tts_dtype=_env("LIVE_TTS_QWEN_DTYPE", "bfloat16"),
             qwen_tts_attn_implementation=_env(
                 "LIVE_TTS_QWEN_ATTN_IMPLEMENTATION", ""
+            ),
+            qwen_tts_url=_env("LIVE_TTS_QWEN_URL", ""),
+            qwen_tts_auto_start=_env_bool("LIVE_TTS_QWEN_AUTO_START", True),
+            qwen_tts_worker_host=_env("LIVE_TTS_QWEN_WORKER_HOST", "127.0.0.1"),
+            qwen_tts_worker_port=_env_int("LIVE_TTS_QWEN_WORKER_PORT", 8031),
+            qwen_tts_worker_dir=_env(
+                "LIVE_TTS_QWEN_WORKER_DIR", ".live_tts_workers/qwen3_tts"
+            ),
+            qwen_tts_worker_python=_env("LIVE_TTS_QWEN_WORKER_PYTHON", ""),
+            qwen_tts_worker_install=_env_bool("LIVE_TTS_QWEN_WORKER_INSTALL", True),
+            qwen_tts_worker_start_timeout_s=_env_float(
+                "LIVE_TTS_QWEN_WORKER_START_TIMEOUT_S", 900.0
+            ),
+            qwen_tts_worker_request_timeout_s=_env_float(
+                "LIVE_TTS_QWEN_WORKER_REQUEST_TIMEOUT_S", 120.0
             ),
             ctc_tts_url=_env("LIVE_TTS_CTC_URL", ""),
             ctc_tts_voice=_env("LIVE_TTS_CTC_VOICE", "default"),

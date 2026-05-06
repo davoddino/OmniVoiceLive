@@ -7,6 +7,9 @@ import io
 import logging
 import math
 import random
+import os
+import subprocess
+import sys
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -454,26 +457,30 @@ class OmniVoiceTTS(BaseTTS):
 class Qwen3TTS(BaseTTS):
     def __init__(self, config: LiveTTSConfig) -> None:
         self.config = config
-        self.model = None
         self.sample_rate = 24000
-        self._lock = threading.Lock()
+        self._process: subprocess.Popen | None = None
+        self._owns_process = False
+        self._url = self._resolve_url()
 
     async def start(self) -> None:
-        logger.info(
-            "qwen3_tts loading model=%s mode=%s speaker=%s device_map=%s",
-            self.config.qwen_tts_model,
-            self.config.qwen_tts_mode,
-            self.config.qwen_tts_speaker,
-            self.config.qwen_tts_device_map,
-        )
-        await asyncio.to_thread(self._load_model)
+        if self.config.qwen_tts_auto_start and not self.config.qwen_tts_url.strip():
+            await asyncio.to_thread(self._ensure_worker_process)
+        await self._wait_ready()
         if self.config.tts_warmup_enabled:
-            logger.info("qwen3_tts warmup text=%r", self.config.tts_warmup_text)
+            logger.info("qwen3_tts worker warmup text=%r", self.config.tts_warmup_text)
             await self.synthesize(self.config.tts_warmup_text, first=True)
-        logger.info("qwen3_tts ready sample_rate=%s", self.sample_rate)
+        logger.info("qwen3_tts worker ready sample_rate=%s", self.sample_rate)
 
     async def close(self) -> None:
-        self.model = None
+        if self._owns_process and self._process is not None:
+            process = self._process
+            self._process = None
+            process.terminate()
+            try:
+                await asyncio.to_thread(process.wait, 20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                await asyncio.to_thread(process.wait)
         await asyncio.to_thread(_release_torch_memory)
 
     async def synthesize(
@@ -486,74 +493,146 @@ class Qwen3TTS(BaseTTS):
     ) -> np.ndarray:
         return await asyncio.to_thread(self._synthesize_sync, text, language)
 
-    def _load_model(self) -> None:
-        if self.model is not None:
+    def _ensure_worker_process(self) -> None:
+        if self._process is not None and self._process.poll() is None:
+            return
+
+        worker_python = self._worker_python_path()
+        worker_dir = _resolve_path(self.config.qwen_tts_worker_dir)
+        worker_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.qwen_tts_worker_install:
+            self._ensure_worker_environment(worker_python)
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "LIVE_TTS_QWEN_MODEL": self.config.qwen_tts_model,
+                "LIVE_TTS_QWEN_MODE": self.config.qwen_tts_mode,
+                "LIVE_TTS_QWEN_SPEAKER": self.config.qwen_tts_speaker,
+                "LIVE_TTS_QWEN_INSTRUCT": self.config.qwen_tts_instruct,
+                "LIVE_TTS_QWEN_DEVICE_MAP": self.config.qwen_tts_device_map,
+                "LIVE_TTS_QWEN_DTYPE": self.config.qwen_tts_dtype,
+                "LIVE_TTS_QWEN_ATTN_IMPLEMENTATION": (
+                    self.config.qwen_tts_attn_implementation
+                ),
+                "LIVE_TTS_QWEN_WORKER_HOST": self.config.qwen_tts_worker_host,
+                "LIVE_TTS_QWEN_WORKER_PORT": str(self.config.qwen_tts_worker_port),
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            }
+        )
+        command = [
+            str(worker_python),
+            "-m",
+            "live_tts.qwen_worker",
+            "--host",
+            self.config.qwen_tts_worker_host,
+            "--port",
+            str(self.config.qwen_tts_worker_port),
+        ]
+        logger.info("qwen3_tts starting worker command=%s", " ".join(command))
+        self._process = subprocess.Popen(command, env=env, cwd=Path.cwd())
+        self._owns_process = True
+
+    def _ensure_worker_environment(self, worker_python: Path) -> None:
+        requirements = Path.cwd() / "more_requirement.txt"
+        if not requirements.is_file():
+            raise RuntimeError(f"Missing Qwen worker requirements file: {requirements}")
+        if not worker_python.exists():
+            venv_dir = worker_python.parents[1]
+            logger.info("qwen3_tts creating worker venv=%s", venv_dir)
+            subprocess.run(
+                ["uv", "venv", str(venv_dir), "--python", sys.executable],
+                check=True,
+            )
+        marker = worker_python.parents[1] / ".live_tts_qwen_installed"
+        if marker.exists():
             return
         try:
-            import torch
-            from qwen_tts import Qwen3TTSModel
-        except ImportError as exc:
-            raise RuntimeError(
-                "Qwen3-TTS is not installed. Install optional TTS dependencies "
-                "with: uv pip install -r more_requirement.txt"
-            ) from exc
+            subprocess.run(
+                [
+                    str(worker_python),
+                    "-c",
+                    "from qwen_tts import Qwen3TTSModel; print('ok')",
+                ],
+                check=True,
+            )
+            marker.write_text("installed\n", encoding="utf-8")
+            return
+        except subprocess.CalledProcessError:
+            pass
 
-        kwargs: dict[str, Any] = {
-            "device_map": self.config.qwen_tts_device_map,
-            "dtype": _resolve_torch_dtype(torch, self.config.qwen_tts_dtype),
-        }
-        attn_impl = self.config.qwen_tts_attn_implementation.strip()
-        if attn_impl:
-            kwargs["attn_implementation"] = attn_impl
-        self.model = Qwen3TTSModel.from_pretrained(
-            self.config.qwen_tts_model,
-            **kwargs,
+        logger.info("qwen3_tts installing worker requirements=%s", requirements)
+        subprocess.run(
+            [str(worker_python), "-m", "pip", "install", "-r", str(requirements)],
+            check=True,
         )
+        marker.write_text("installed\n", encoding="utf-8")
 
     def _synthesize_sync(self, text: str, language: str | None) -> np.ndarray:
-        if self.model is None:
-            self._load_model()
-        assert self.model is not None
+        import requests
 
-        qwen_language = _qwen_language(language or self.config.tts_language)
-        mode = self.config.qwen_tts_mode.strip().lower().replace("-", "_")
-        instruct = self.config.qwen_tts_instruct.strip()
-        with self._lock:
-            if mode in {"voice_design", "design"}:
-                if not hasattr(self.model, "generate_voice_design"):
-                    raise RuntimeError(
-                        "The selected Qwen3-TTS model does not expose "
-                        "generate_voice_design(). Use a VoiceDesign model or "
-                        "LIVE_TTS_QWEN_MODE=custom_voice."
-                    )
-                wavs, sample_rate = self.model.generate_voice_design(
-                    text=text,
-                    language=qwen_language,
-                    instruct=instruct,
-                )
-            elif mode in {"custom_voice", "voice", "speaker"}:
-                if not hasattr(self.model, "generate_custom_voice"):
-                    raise RuntimeError(
-                        "The selected Qwen3-TTS model does not expose "
-                        "generate_custom_voice(). Use a CustomVoice model or "
-                        "LIVE_TTS_QWEN_MODE=voice_design."
-                    )
-                wavs, sample_rate = self.model.generate_custom_voice(
-                    text=text,
-                    language=qwen_language,
-                    speaker=self.config.qwen_tts_speaker,
-                    instruct=instruct,
-                )
-            else:
-                raise RuntimeError(
-                    "Unsupported LIVE_TTS_QWEN_MODE. Use custom_voice or voice_design."
-                )
-
-        self.sample_rate = int(sample_rate or self.sample_rate)
-        waveform = _first_waveform(wavs)
+        response = requests.post(
+            f"{self._url}/synthesize",
+            json={
+                "text": text,
+                "language": language or self.config.tts_language,
+                "mode": self.config.qwen_tts_mode,
+                "speaker": self.config.qwen_tts_speaker,
+                "instruct": self.config.qwen_tts_instruct,
+            },
+            timeout=self.config.qwen_tts_worker_request_timeout_s,
+        )
+        response.raise_for_status()
+        waveform, sample_rate = _decode_tts_worker_response(response)
+        if sample_rate:
+            self.sample_rate = int(sample_rate)
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
         waveform = apply_edge_fade(waveform, self.sample_rate)
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
+
+    async def _wait_ready(self) -> None:
+        import requests
+
+        deadline = (
+            asyncio.get_running_loop().time()
+            + self.config.qwen_tts_worker_start_timeout_s
+        )
+        last_error = ""
+        while asyncio.get_running_loop().time() < deadline:
+            if self._process is not None and self._process.poll() is not None:
+                raise RuntimeError(
+                    f"Qwen worker exited with code {self._process.returncode}."
+                )
+            try:
+                response = await asyncio.to_thread(
+                    requests.get,
+                    f"{self._url}/health",
+                    timeout=5,
+                )
+                if response.ok and response.json().get("ok"):
+                    self.sample_rate = int(response.json().get("sample_rate") or 24000)
+                    return
+                last_error = response.text[:300]
+            except Exception as exc:
+                last_error = str(exc)
+            await asyncio.sleep(1.0)
+        raise RuntimeError(f"Qwen worker did not become ready: {last_error}")
+
+    def _resolve_url(self) -> str:
+        configured = self.config.qwen_tts_url.strip().rstrip("/")
+        if configured:
+            return configured
+        return (
+            f"http://{self.config.qwen_tts_worker_host}:"
+            f"{self.config.qwen_tts_worker_port}"
+        )
+
+    def _worker_python_path(self) -> Path:
+        configured = self.config.qwen_tts_worker_python.strip()
+        if configured:
+            return _resolve_path(configured)
+        worker_dir = _resolve_path(self.config.qwen_tts_worker_dir)
+        return worker_dir / ".venv" / "bin" / "python"
 
 
 class CTCTTSWorker(BaseTTS):
@@ -801,56 +880,6 @@ def _audio_duration_seconds(path: Path) -> float:
     except Exception:
         logger.debug("unable to read reference audio duration", exc_info=True)
     return 0.0
-
-
-def _resolve_torch_dtype(torch_module, value: str):
-    normalized = value.strip().lower()
-    if normalized in {"float16", "fp16", "half"}:
-        return torch_module.float16
-    if normalized in {"bfloat16", "bf16"}:
-        return torch_module.bfloat16
-    if normalized in {"float32", "fp32"}:
-        return torch_module.float32
-    raise ValueError(f"Unsupported dtype: {value}")
-
-
-def _qwen_language(value: str) -> str:
-    normalized = str(value or "").strip().lower()
-    mapping = {
-        "it": "Italian",
-        "italian": "Italian",
-        "italiano": "Italian",
-        "en": "English",
-        "english": "English",
-        "es": "Spanish",
-        "spanish": "Spanish",
-        "fr": "French",
-        "french": "French",
-        "de": "German",
-        "german": "German",
-        "zh": "Chinese",
-        "cn": "Chinese",
-        "ja": "Japanese",
-        "jp": "Japanese",
-        "ko": "Korean",
-        "ru": "Russian",
-        "pt": "Portuguese",
-    }
-    return mapping.get(normalized, value or "Italian")
-
-
-def _first_waveform(wavs: Any) -> np.ndarray:
-    first = wavs[0] if isinstance(wavs, (list, tuple)) else wavs
-    if hasattr(first, "detach"):
-        first = first.detach().cpu().numpy()
-    waveform = np.asarray(first, dtype=np.float32)
-    if waveform.ndim == 2:
-        waveform = (
-            waveform.mean(axis=0)
-            if waveform.shape[0] <= waveform.shape[1]
-            else waveform.mean(axis=1)
-        )
-    return waveform.reshape(-1).astype(np.float32, copy=False)
 
 
 def _decode_tts_worker_response(response: Any) -> tuple[np.ndarray, int | None]:
