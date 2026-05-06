@@ -23,11 +23,6 @@ class STTService:
             return {"text": "", "language": None, "language_probability": 0.0}
 
         backend = self.config.stt_backend
-        if backend == "mock":
-            return {
-                "text": "Vorrei informazioni sui vostri servizi.",
-                "language": language or self.config.stt_language,
-            }
         if self.config.stt_url and backend in {"auto", "http"}:
             return await asyncio.to_thread(self._transcribe_http, wav_bytes, language)
         return await asyncio.to_thread(self._transcribe_local, wav_bytes, language)
@@ -75,8 +70,7 @@ class STTService:
             except ImportError as exc:
                 raise RuntimeError(
                     "faster-whisper is required for local STT. "
-                    "Set LIVE_TTS_STT_URL to use whisper.py over HTTP, or "
-                    "LIVE_TTS_STT_BACKEND=mock for transport tests."
+                    "Set LIVE_TTS_STT_URL to use whisper.py over HTTP."
                 ) from exc
             self._model = WhisperModel(
                 self.config.whisper_model,

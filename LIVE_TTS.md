@@ -224,11 +224,6 @@ LIVE_TTS_QWEN_WORKER_INSTALL=true
 LIVE_TTS_QWEN_WORKER_START_TIMEOUT_S=900
 LIVE_TTS_QWEN_WORKER_REQUEST_TIMEOUT_S=120
 
-LIVE_TTS_CTC_URL=
-LIVE_TTS_CTC_VOICE=default
-LIVE_TTS_CTC_SAMPLE_RATE=24000
-LIVE_TTS_CTC_TIMEOUT_S=120
-
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
 LIVE_TTS_STT_LANGUAGE=it
@@ -290,14 +285,6 @@ di silenzio prima dell'audio passato a Whisper e mantiene 700 ms di preroll VAD.
 Questi valori non rendono il barge-in piu' sensibile: servono solo a non tagliare
 le prime sillabe.
 
-Per testare solo trasporto audio e UI senza GPU:
-
-```text
-LIVE_TTS_TTS_BACKEND=mock
-LIVE_TTS_STT_BACKEND=mock
-LIVE_TTS_LLM_BACKEND=mock
-```
-
 ## Avvio
 
 Con `.env` configurato:
@@ -324,8 +311,6 @@ engine attivo alla volta:
 
 - `OmniVoice`: default, caricato all'avvio.
 - `Qwen3-TTS`: opzionale, avviato in un worker isolato solo quando selezionato.
-- `CTC-TTS`: worker HTTP esterno sperimentale.
-- `Mock`: test di trasporto senza GPU.
 
 Quando cambi engine, il turno corrente viene cancellato, il modello precedente
 viene scaricato o il worker viene terminato, la GPU viene liberata e l'interfaccia
@@ -351,15 +336,6 @@ OOM. Per provare voice design invece dei preset:
 LIVE_TTS_QWEN_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
 LIVE_TTS_QWEN_MODE=voice_design
 LIVE_TTS_QWEN_INSTRUCT=Speak in Italian with a warm, confident, lively call-center tone.
-```
-
-CTC-TTS non viene caricato in-process: configura un worker che accetti `POST`
-JSON con `text`, `language`, `voice` e `sample_rate`, e risponda con WAV bytes,
-`audio_base64`, `wav_base64`, `pcm16_base64` o `samples`.
-
-```text
-LIVE_TTS_CTC_URL=http://127.0.0.1:8030/synthesize
-LIVE_TTS_CTC_SAMPLE_RATE=24000
 ```
 
 ## Stabilita' Del Timbro

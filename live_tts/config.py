@@ -202,11 +202,6 @@ class LiveTTSConfig:
     qwen_tts_worker_start_timeout_s: float
     qwen_tts_worker_request_timeout_s: float
 
-    ctc_tts_url: str
-    ctc_tts_voice: str
-    ctc_tts_sample_rate: int
-    ctc_tts_timeout_s: float
-
     stt_backend: str
     stt_url: str
     stt_language: str
@@ -364,10 +359,6 @@ class LiveTTSConfig:
             qwen_tts_worker_request_timeout_s=_env_float(
                 "LIVE_TTS_QWEN_WORKER_REQUEST_TIMEOUT_S", 120.0
             ),
-            ctc_tts_url=_env("LIVE_TTS_CTC_URL", ""),
-            ctc_tts_voice=_env("LIVE_TTS_CTC_VOICE", "default"),
-            ctc_tts_sample_rate=_env_int("LIVE_TTS_CTC_SAMPLE_RATE", 24000),
-            ctc_tts_timeout_s=_env_float("LIVE_TTS_CTC_TIMEOUT_S", 120.0),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
             stt_url=_env("LIVE_TTS_STT_URL", ""),
             stt_language=_env("LIVE_TTS_STT_LANGUAGE", "it"),

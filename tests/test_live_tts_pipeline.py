@@ -94,7 +94,6 @@ class LiveTTSPipelineTests(unittest.TestCase):
 
     def test_tts_engine_aliases_are_normalized(self) -> None:
         self.assertEqual(normalize_tts_engine("qwen"), "qwen3_tts")
-        self.assertEqual(normalize_tts_engine("ctc"), "ctc_tts")
         self.assertEqual(normalize_tts_engine("omni-voice"), "omnivoice")
 
 

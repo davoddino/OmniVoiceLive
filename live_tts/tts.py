@@ -5,7 +5,6 @@ import base64
 import gc
 import io
 import logging
-import math
 import random
 import os
 import subprocess
@@ -56,32 +55,6 @@ class BaseTTS(ABC):
         voice_config: VoiceSessionConfig | None = None,
     ) -> np.ndarray:
         raise NotImplementedError
-
-
-class MockTTS(BaseTTS):
-    sample_rate = 24000
-
-    async def synthesize(
-        self,
-        text: str,
-        first: bool,
-        state: TTSTurnState | None = None,
-        language: str | None = None,
-        voice_config: VoiceSessionConfig | None = None,
-    ) -> np.ndarray:
-        duration = min(3.2, max(0.45, len(text) / 38.0))
-        samples = int(self.sample_rate * duration)
-        t = np.arange(samples, dtype=np.float32) / self.sample_rate
-        base = 175.0
-        wave = 0.12 * np.sin(2.0 * math.pi * base * t)
-        wave += 0.045 * np.sin(2.0 * math.pi * base * 2.01 * t)
-        envelope = np.ones_like(wave)
-        fade = min(samples // 4, int(self.sample_rate * 0.035))
-        if fade > 0:
-            envelope[:fade] = np.linspace(0.0, 1.0, fade)
-            envelope[-fade:] = np.linspace(1.0, 0.0, fade)
-        await asyncio.sleep(0.04 if first else 0.08)
-        return (wave * envelope).astype(np.float32)
 
 
 @dataclass(frozen=True)
@@ -658,55 +631,6 @@ class Qwen3TTS(BaseTTS):
         return worker_dir / ".venv" / "bin" / "python"
 
 
-class CTCTTSWorker(BaseTTS):
-    def __init__(self, config: LiveTTSConfig) -> None:
-        self.config = config
-        self.sample_rate = max(1, config.ctc_tts_sample_rate)
-
-    async def start(self) -> None:
-        if not self.config.ctc_tts_url.strip():
-            raise RuntimeError(
-                "CTC-TTS is configured as an external worker. Set "
-                "LIVE_TTS_CTC_URL to enable it."
-            )
-        if self.config.tts_warmup_enabled:
-            logger.info("ctc_tts worker warmup text=%r", self.config.tts_warmup_text)
-            await self.synthesize(self.config.tts_warmup_text, first=True)
-        logger.info("ctc_tts worker ready sample_rate=%s", self.sample_rate)
-
-    async def synthesize(
-        self,
-        text: str,
-        first: bool,
-        state: TTSTurnState | None = None,
-        language: str | None = None,
-        voice_config: VoiceSessionConfig | None = None,
-    ) -> np.ndarray:
-        return await asyncio.to_thread(self._synthesize_sync, text, language)
-
-    def _synthesize_sync(self, text: str, language: str | None) -> np.ndarray:
-        import requests
-
-        payload = {
-            "text": text,
-            "language": language or self.config.tts_language,
-            "voice": self.config.ctc_tts_voice,
-            "sample_rate": self.sample_rate,
-        }
-        response = requests.post(
-            self.config.ctc_tts_url,
-            json=payload,
-            timeout=self.config.ctc_tts_timeout_s,
-        )
-        response.raise_for_status()
-        waveform, sample_rate = _decode_tts_worker_response(response)
-        if sample_rate:
-            self.sample_rate = int(sample_rate)
-        waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
-        waveform = apply_edge_fade(waveform, self.sample_rate)
-        return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
-
-
 class TTSEngineManager(BaseTTS):
     def __init__(self, config: LiveTTSConfig) -> None:
         self.config = config
@@ -838,18 +762,6 @@ TTS_ENGINE_DEFINITIONS = [
         description="Engine opzionale Qwen, caricato solo quando selezionato.",
         kind="local_optional",
     ),
-    TTSEngineDefinition(
-        id="ctc_tts",
-        label="CTC-TTS",
-        description="Worker esterno sperimentale per dual-streaming CTC.",
-        kind="external_worker",
-    ),
-    TTSEngineDefinition(
-        id="mock",
-        label="Mock",
-        description="Senoide locale per test di trasporto.",
-        kind="local_test",
-    ),
 ]
 
 
@@ -861,15 +773,9 @@ def create_tts_engine(config: LiveTTSConfig, engine: str) -> BaseTTS:
     backend = normalize_tts_engine(engine)
     if backend == "qwen3_tts":
         return Qwen3TTS(config)
-    if backend == "ctc_tts":
-        return CTCTTSWorker(config)
-    if backend == "mock":
-        return MockTTS()
     if backend == "omnivoice":
         return OmniVoiceTTS(config)
-    raise ValueError(
-        "Unsupported TTS engine. Use omnivoice, qwen3_tts, ctc_tts, or mock."
-    )
+    raise ValueError("Unsupported TTS engine. Use omnivoice or qwen3_tts.")
 
 
 def normalize_tts_engine(value: str) -> str:
@@ -878,8 +784,6 @@ def normalize_tts_engine(value: str) -> str:
         "qwen": "qwen3_tts",
         "qwen_tts": "qwen3_tts",
         "qwen3": "qwen3_tts",
-        "ctc": "ctc_tts",
-        "ctc_tts_worker": "ctc_tts",
         "omni": "omnivoice",
         "omni_voice": "omnivoice",
     }
@@ -920,7 +824,7 @@ def _decode_tts_worker_response(response: Any) -> tuple[np.ndarray, int | None]:
         if data.get("samples") is not None:
             return np.asarray(data["samples"], dtype=np.float32).reshape(-1), sample_rate
         raise RuntimeError(
-            "CTC-TTS worker JSON must include audio_base64, wav_base64, "
+            "TTS worker JSON must include audio_base64, wav_base64, "
             "pcm16_base64, or samples."
         )
     return _read_audio_bytes(response.content)

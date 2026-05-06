@@ -23,11 +23,6 @@ class LLMStreamer:
         language: str | None = None,
         rag_context: str = "",
     ) -> AsyncIterator[str]:
-        if self.config.llm_backend == "mock":
-            async for piece in self._mock_stream(prompt, cancel_event, rag_context):
-                yield piece
-            return
-
         if not self.config.llm_url:
             raise RuntimeError("LIVE_TTS_LLM_URL is required when LLM backend is openai")
 
@@ -39,26 +34,6 @@ class LLMStreamer:
             rag_context,
         ):
             yield piece
-
-    async def _mock_stream(
-        self,
-        prompt: str,
-        cancel_event: threading.Event,
-        rag_context: str = "",
-    ) -> AsyncIterator[str]:
-        text = "Certo, ti aiuto subito. Dimmi qual e' il punto principale."
-        if rag_context:
-            text = "Ho verificato le informazioni disponibili. Ti rispondo in modo sintetico."
-        if "prezzo" in prompt.lower():
-            text = (
-                "Certo. Per darti un prezzo corretto devo capire volume, canali "
-                "e integrazioni richieste. Possiamo partire dal numero di chiamate mensili."
-            )
-        for token in text.split(" "):
-            if cancel_event.is_set():
-                return
-            yield token + " "
-            await asyncio.sleep(0.035)
 
     async def _openai_compatible_stream(
         self,

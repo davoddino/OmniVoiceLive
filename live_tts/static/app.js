@@ -27,8 +27,6 @@ const LANGUAGE_LABELS = {
 const ENGINE_LABELS = {
   omnivoice: "OmniVoice",
   qwen3_tts: "Qwen3-TTS",
-  ctc_tts: "CTC-TTS",
-  mock: "Mock",
 };
 
 let socket = null;

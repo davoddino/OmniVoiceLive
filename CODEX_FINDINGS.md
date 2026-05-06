@@ -10,7 +10,7 @@ Data analisi: 2026-05-05
 - VAD server: `live_tts/audio.py`, classe `AudioTurnDetector`, usa RMS fisso (`LIVE_TTS_VAD_THRESHOLD`), start/end ms, preroll e durata massima.
 - Barge-in client: `live_tts/static/app.js`, usa RMS locale con threshold configurato dal server.
 - STT: `live_tts/stt.py`, HTTP esterno se configurato, altrimenti `faster-whisper` locale.
-- LLM: `live_tts/llm.py`, streaming OpenAI-compatible o mock. Il prompt di sistema arriva da `live_tts/prompts/cavadalabs_voice.md`.
+- LLM: `live_tts/llm.py`, streaming OpenAI-compatible. Il prompt di sistema arriva da `live_tts/prompts/cavadalabs_voice.md`.
 - Chunking risposta: `live_tts/segmenter.py`, `LiveTextSegmenter`, alimentato dai delta LLM in `RealtimeSession._respond`.
 - TTS: `live_tts/tts.py`, `OmniVoiceTTS.synthesize`; con `voice_design`, `turn_anchor` o `session_anchor`. I parametri sono in `LiveTTSConfig`.
 - Salvataggio: al momento non c'e' un recorder/session writer persistente per audio, transcript, metriche o CRM event log.
