@@ -14,6 +14,7 @@ const connectionLabel = document.getElementById("connectionLabel");
 const audioModeLabel = document.getElementById("audioModeLabel");
 const voiceModeLabel = document.getElementById("voiceModeLabel");
 const languageSelect = document.getElementById("languageSelect");
+const ttsEngineSelect = document.getElementById("ttsEngineSelect");
 
 const LANGUAGE_LABELS = {
   it: "Italiano",
@@ -21,6 +22,13 @@ const LANGUAGE_LABELS = {
   es: "Español",
   fr: "Français",
   de: "Deutsch",
+};
+
+const ENGINE_LABELS = {
+  omnivoice: "OmniVoice",
+  qwen3_tts: "Qwen3-TTS",
+  ctc_tts: "CTC-TTS",
+  mock: "Mock",
 };
 
 let socket = null;
@@ -50,6 +58,13 @@ let cleaningUp = false;
 let callStartedAt = 0;
 let timerInterval = null;
 let sessionShortId = null;
+let sessionStarted = false;
+let audioStreamingPaused = false;
+let pendingSessionStart = false;
+let pendingMicFrames = [];
+let pendingMicSamples = 0;
+
+const pendingMicMaxMs = 1400;
 
 const clientVad = {
   threshold: 0.012,
@@ -63,6 +78,7 @@ const clientVad = {
 
 startButton.addEventListener("click", startCall);
 stopButton.addEventListener("click", stopCall);
+ttsEngineSelect.addEventListener("change", onTtsEngineChange);
 
 async function startCall() {
   try {
@@ -70,10 +86,15 @@ async function startCall() {
     setState("connecting", "Connessione");
     startButton.disabled = true;
     languageSelect.disabled = true;
+    ttsEngineSelect.disabled = true;
     transportLabel.textContent =
       location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
     connectionLabel.textContent = "Avvio";
-    voiceModeLabel.textContent = "Voce OmniVoice stabile";
+    updateEngineStatus({
+      engine: selectedEngine(),
+      status: "connecting",
+      sample_rate: ttsSampleRate,
+    });
 
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) {
@@ -180,6 +201,9 @@ function cleanup(label) {
   socket = null;
   socketWasOpen = false;
   sessionShortId = null;
+  sessionStarted = false;
+  audioStreamingPaused = false;
+  pendingSessionStart = false;
   audioContext = null;
   mediaStream = null;
   recorderNode = null;
@@ -188,6 +212,8 @@ function cleanup(label) {
   fallbackPlayerQueue = [];
   fallbackPlayerOffset = 0;
   fallbackQueuedSamples = 0;
+  pendingMicFrames = [];
+  pendingMicSamples = 0;
   playerBufferedMs = 0;
   assistantSpeaking = false;
   assistantPlaybackActive = false;
@@ -200,6 +226,7 @@ function cleanup(label) {
   stopTimer();
   startButton.disabled = false;
   languageSelect.disabled = false;
+  ttsEngineSelect.disabled = false;
   stopButton.disabled = true;
   sessionLabel.textContent = label;
   connectionLabel.textContent = "Offline";
@@ -213,7 +240,13 @@ function cleanup(label) {
 function onMicFrame(event) {
   const frame = event.data;
   updateClientVad(frame);
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (
+    !socket ||
+    socket.readyState !== WebSocket.OPEN ||
+    !sessionStarted ||
+    audioStreamingPaused
+  ) {
+    rememberPendingMicFrame(frame);
     return;
   }
   socket.send(frame.buffer);
@@ -288,16 +321,15 @@ function connectWebSocket() {
     }
     addSystemMessage("INFO: WebSocket aperto.");
     connectionLabel.textContent = "Online";
+    pendingSessionStart = true;
+    audioStreamingPaused = true;
     socket.send(
       JSON.stringify({
-        type: "session.start",
-        sample_rate: audioContext ? audioContext.sampleRate : 48000,
-        language: selectedLanguage(),
+        type: "tts.engine.select",
+        engine: selectedEngine(),
       }),
     );
-    setState("listening", "Ascolto");
     startTimer();
-    stopButton.disabled = false;
   };
 
   socket.onmessage = onSocketMessage;
@@ -326,6 +358,79 @@ function connectWebSocket() {
     connectionLabel.textContent = "Errore";
     setState("error", "Errore");
   };
+}
+
+function rememberPendingMicFrame(frame) {
+  if (!audioContext || !frame || frame.length === 0) {
+    return;
+  }
+  const copy = new Float32Array(frame.length);
+  copy.set(frame);
+  pendingMicFrames.push(copy);
+  pendingMicSamples += copy.length;
+
+  const maxSamples = Math.max(
+    1,
+    Math.round((audioContext.sampleRate * pendingMicMaxMs) / 1000),
+  );
+  while (pendingMicSamples > maxSamples && pendingMicFrames.length > 0) {
+    const dropped = pendingMicFrames.shift();
+    pendingMicSamples -= dropped ? dropped.length : 0;
+  }
+}
+
+function flushPendingMicFrames() {
+  if (!socket || socket.readyState !== WebSocket.OPEN || pendingMicFrames.length === 0) {
+    pendingMicFrames = [];
+    pendingMicSamples = 0;
+    return;
+  }
+  const frameCount = pendingMicFrames.length;
+  const durationMs = audioContext
+    ? Math.round((pendingMicSamples / audioContext.sampleRate) * 1000)
+    : 0;
+  for (const frame of pendingMicFrames) {
+    socket.send(frame.buffer);
+  }
+  pendingMicFrames = [];
+  pendingMicSamples = 0;
+  addSystemMessage(
+    `INFO: Inviato preroll microfono iniziale ${durationMs} ms (${frameCount} frame).`,
+  );
+}
+
+function onTtsEngineChange() {
+  updateEngineStatus({
+    engine: selectedEngine(),
+    status: socket && socket.readyState === WebSocket.OPEN ? "loading" : "selected",
+    sample_rate: ttsSampleRate,
+  });
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  audioStreamingPaused = true;
+  clearPlayer();
+  socket.send(
+    JSON.stringify({
+      type: "tts.engine.select",
+      engine: selectedEngine(),
+    }),
+  );
+}
+
+function sendSessionStart() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  pendingSessionStart = false;
+  socket.send(
+    JSON.stringify({
+      type: "session.start",
+      sample_rate: audioContext ? audioContext.sampleRate : 48000,
+      language: selectedLanguage(),
+      tts_engine: selectedEngine(),
+    }),
+  );
 }
 
 async function resumeAudioContextWithTimeout(timeoutMs = 1200) {
@@ -471,15 +576,75 @@ function onSocketMessage(event) {
     case "session.ready":
       ttsSampleRate = message.tts_sample_rate;
       configureClientBargeIn(message);
+      configureTtsEngines(message.tts_engines, message.tts_engine);
+      updateEngineStatus(message.tts_engine);
       sessionShortId = message.session_id.slice(0, 8);
       updateSessionLabel(message.language || selectedLanguage());
       break;
     case "session.started":
+      sessionStarted = true;
+      audioStreamingPaused = false;
       if (message.language) {
         updateSessionLabel(message.language);
       }
+      if (message.tts_sample_rate) {
+        ttsSampleRate = message.tts_sample_rate;
+      }
+      updateEngineStatus(message.tts_engine);
       connectionLabel.textContent = "Online";
+      ttsEngineSelect.disabled = false;
+      stopButton.disabled = false;
+      flushPendingMicFrames();
       setState("listening", "Ascolto");
+      break;
+    case "tts.engine.loading":
+      audioStreamingPaused = true;
+      ttsEngineSelect.disabled = true;
+      clearPlayer();
+      updateEngineStatus({
+        engine: message.engine,
+        status: "loading",
+        sample_rate: ttsSampleRate,
+      });
+      connectionLabel.textContent = "Carico TTS";
+      setState("connecting", "Carico voce");
+      break;
+    case "tts.engine.ready":
+      audioStreamingPaused = false;
+      if (message.tts_sample_rate || message.sample_rate) {
+        ttsSampleRate = message.tts_sample_rate || message.sample_rate;
+      }
+      configureTtsEngines(message.tts_engines, message);
+      updateEngineStatus(message);
+      ttsEngineSelect.disabled = false;
+      if (sessionStarted) {
+        flushPendingMicFrames();
+        connectionLabel.textContent = "Online";
+        setState("listening", "Ascolto");
+      } else if (pendingSessionStart) {
+        sendSessionStart();
+      }
+      break;
+    case "tts.engine.error":
+      audioStreamingPaused = false;
+      ttsEngineSelect.disabled = false;
+      configureTtsEngines(message.tts_engines, {
+        engine: message.engine,
+        status: "failed",
+      });
+      updateEngineStatus({
+        engine: message.engine,
+        status: "failed",
+        error: message.message,
+      });
+      addSystemMessage(message.message || "Engine TTS non disponibile.");
+      connectionLabel.textContent = "Errore TTS";
+      setState("error", "Errore");
+      if (!sessionStarted) {
+        startButton.disabled = false;
+        languageSelect.disabled = false;
+        stopButton.disabled = true;
+      }
       break;
     case "audio.meter":
       updateServerMeter(message.rms);
@@ -567,12 +732,61 @@ function selectedLanguage() {
   return languageSelect ? languageSelect.value : "it";
 }
 
+function selectedEngine() {
+  return ttsEngineSelect ? ttsEngineSelect.value : "omnivoice";
+}
+
 function updateSessionLabel(language) {
   const label = LANGUAGE_LABELS[language] || language || "Italiano";
   if (sessionShortId) {
     sessionLabel.textContent = `Sessione ${sessionShortId} · ${label}`;
   } else {
     sessionLabel.textContent = `Sessione ${label}`;
+  }
+}
+
+function configureTtsEngines(engines, activeStatus) {
+  if (!ttsEngineSelect || !Array.isArray(engines) || engines.length === 0) {
+    return;
+  }
+  const selected = activeStatus && activeStatus.engine ? activeStatus.engine : selectedEngine();
+  ttsEngineSelect.innerHTML = "";
+  for (const engine of engines) {
+    const option = document.createElement("option");
+    option.value = engine.id;
+    option.textContent = engine.label || ENGINE_LABELS[engine.id] || engine.id;
+    ttsEngineSelect.appendChild(option);
+  }
+  if ([...ttsEngineSelect.options].some((option) => option.value === selected)) {
+    ttsEngineSelect.value = selected;
+  }
+}
+
+function updateEngineStatus(status) {
+  if (!status) {
+    return;
+  }
+  const engine = status.engine || selectedEngine();
+  const label = ENGINE_LABELS[engine] || engine || "TTS";
+  if (ttsEngineSelect && ttsEngineSelect.value !== engine) {
+    const exists = [...ttsEngineSelect.options].some((option) => option.value === engine);
+    if (exists) {
+      ttsEngineSelect.value = engine;
+    }
+  }
+
+  const state = status.status || "ready";
+  const sampleRate = status.sample_rate || status.tts_sample_rate || ttsSampleRate;
+  if (state === "ready") {
+    voiceModeLabel.textContent = `${label} pronto · ${sampleRate} Hz`;
+  } else if (state === "loading") {
+    voiceModeLabel.textContent = `${label} in caricamento`;
+  } else if (state === "failed") {
+    voiceModeLabel.textContent = `${label} errore`;
+  } else if (state === "selected") {
+    voiceModeLabel.textContent = `${label} selezionato`;
+  } else {
+    voiceModeLabel.textContent = `${label} · ${state}`;
   }
 }
 

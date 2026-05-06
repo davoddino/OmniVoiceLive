@@ -10,10 +10,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from live_tts.audio import pad_audio_edges
 from live_tts.playback import drain_segment_queue
 from live_tts.rag import RAGRetriever
 from live_tts.recording import AsyncSessionRecorder
 from live_tts.segmenter import SentenceAccumulator, normalize_tts_text
+from live_tts.tts import normalize_tts_engine
 from live_tts.voice import VoiceSessionConfig
 
 
@@ -81,6 +83,19 @@ class LiveTTSPipelineTests(unittest.TestCase):
         finally:
             asyncio.set_event_loop(None)
             loop.close()
+
+    def test_stt_padding_preserves_original_audio(self) -> None:
+        samples = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+        padded = pad_audio_edges(samples, sample_rate=1000, lead_ms=2, tail_ms=1)
+
+        np.testing.assert_allclose(padded[:2], np.zeros(2, dtype=np.float32))
+        np.testing.assert_allclose(padded[2:5], samples)
+        np.testing.assert_allclose(padded[5:], np.zeros(1, dtype=np.float32))
+
+    def test_tts_engine_aliases_are_normalized(self) -> None:
+        self.assertEqual(normalize_tts_engine("qwen"), "qwen3_tts")
+        self.assertEqual(normalize_tts_engine("ctc"), "ctc_tts")
+        self.assertEqual(normalize_tts_engine("omni-voice"), "omnivoice")
 
 
 class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):

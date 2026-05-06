@@ -1,0 +1,13 @@
+# Optional TTS engines used by the in-app engine selector.
+#
+# Install only when you want to test Qwen3-TTS:
+#   uv pip install -r more_requirement.txt
+#
+# FlashAttention is recommended by Qwen3-TTS on compatible CUDA GPUs, but it is
+# intentionally not pinned here because installation depends on your local CUDA,
+# torch and compiler setup.
+qwen-tts
+
+# CTC-TTS is integrated as an external HTTP worker through LIVE_TTS_CTC_URL.
+# No client-side package is required in this repo until an official runtime is
+# available.

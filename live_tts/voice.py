@@ -36,15 +36,18 @@ class VoiceSessionConfig:
         config: LiveTTSConfig,
         sample_rate: int,
         language: str | None = None,
+        provider: str | None = None,
+        voice_id: str | None = None,
     ) -> "VoiceSessionConfig":
         voice_mode = config.tts_voice_mode.strip().lower().replace("-", "_")
         instruct = config.tts_instruct.strip()
-        voice_id = config.tts_voice_id.strip()
-        if not voice_id:
-            voice_id = f"{config.tts_backend}:{voice_mode}:{instruct or 'auto'}"
+        provider_value = provider or config.tts_backend
+        voice_id_value = voice_id or config.tts_voice_id.strip()
+        if not voice_id_value:
+            voice_id_value = f"{provider_value}:{voice_mode}:{instruct or 'auto'}"
         return cls(
-            provider=config.tts_backend,
-            voice_id=voice_id,
+            provider=provider_value,
+            voice_id=voice_id_value,
             model=config.tts_model,
             speed=config.tts_speed,
             stability=config.tts_stability,

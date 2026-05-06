@@ -33,29 +33,38 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def startup() -> None:
     ensure_websocket_support()
     logger.info(
-        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s reference_audio=%r instruct=%r num_step=%s/%s speed=%.2f segments=%s-%s/%s-%s vad_threshold=%.4f vad_adaptive=%s rag_enabled=%s recording_enabled=%s client_barge_threshold=%.4f",
+        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s reference_audio=%r reference_preprocess=%s instruct=%r num_step=%s/%s speed=%.2f position_temp=%.2f segments=%s-%s/%s-%s vad_threshold=%.4f vad_adaptive=%s vad_preroll_ms=%s stt_padding_ms=%s/%s rag_enabled=%s recording_enabled=%s client_barge_threshold=%.4f",
         config.tts_backend,
         config.stt_backend,
         config.llm_backend,
         bool(config.ssl_certfile and config.ssl_keyfile),
         config.tts_voice_mode,
         config.tts_reference_audio if config.tts_voice_mode == "fixed_reference" else "",
+        config.tts_reference_preprocess,
         config.tts_instruct,
         config.tts_num_step_first,
         config.tts_num_step_next,
         config.tts_speed,
+        config.tts_position_temperature,
         config.segment_min_first_chars,
         config.segment_max_first_chars,
         config.segment_min_next_chars,
         config.segment_max_next_chars,
         config.vad_speech_threshold,
         config.vad_adaptive,
+        config.vad_preroll_ms,
+        config.stt_lead_padding_ms,
+        config.stt_tail_padding_ms,
         config.rag_enabled,
         config.recording_enabled,
         config.client_barge_threshold,
     )
     await tts_service.start()
-    logger.info("live_tts ready tts_sample_rate=%s", tts_service.sample_rate)
+    logger.info(
+        "live_tts ready tts_sample_rate=%s tts_engine=%s",
+        tts_service.sample_rate,
+        tts_status().get("engine"),
+    )
 
 
 @app.get("/")
@@ -69,14 +78,19 @@ async def health() -> dict[str, object]:
         "ok": True,
         "tts_backend": config.tts_backend,
         "tts_sample_rate": tts_service.sample_rate,
+        "tts_engine": tts_status(),
+        "tts_engines": tts_engines(),
         "stt_backend": config.stt_backend,
         "llm_backend": config.llm_backend,
         "tts_voice_mode": config.tts_voice_mode,
         "tts_voice_id": config.tts_voice_id,
         "tts_reference_audio": config.tts_reference_audio,
+        "tts_reference_preprocess": config.tts_reference_preprocess,
         "tts_instruct": config.tts_instruct,
         "tts_language": config.tts_language,
         "stt_language": config.stt_language,
+        "stt_lead_padding_ms": config.stt_lead_padding_ms,
+        "stt_tail_padding_ms": config.stt_tail_padding_ms,
         "tts_num_step_first": config.tts_num_step_first,
         "tts_num_step_next": config.tts_num_step_next,
         "tts_speed": config.tts_speed,
@@ -95,6 +109,7 @@ async def health() -> dict[str, object]:
         "vad_continue_multiplier": config.vad_continue_multiplier,
         "vad_start_ms": config.vad_start_ms,
         "vad_end_ms": config.vad_end_ms,
+        "vad_preroll_ms": config.vad_preroll_ms,
         "websocket_support": has_websocket_support(),
         "client_barge_threshold": config.client_barge_threshold,
         "client_barge_stop_ms": config.client_barge_stop_ms,
@@ -105,6 +120,33 @@ async def health() -> dict[str, object]:
         "recording_enabled": config.recording_enabled,
         "recording_dir": config.recording_dir,
     }
+
+
+def tts_status() -> dict[str, object]:
+    status = getattr(tts_service, "status", None)
+    if status is None:
+        return {
+            "engine": config.tts_backend,
+            "status": "ready",
+            "sample_rate": tts_service.sample_rate,
+            "error": "",
+        }
+    return status()
+
+
+def tts_engines() -> list[dict[str, object]]:
+    engines = getattr(tts_service, "engines", None)
+    if engines is None:
+        return [
+            {
+                "id": config.tts_backend,
+                "label": config.tts_backend,
+                "description": "Configured TTS backend.",
+                "kind": "local",
+                "status": "ready",
+            }
+        ]
+    return engines()
 
 
 @app.websocket("/ws")

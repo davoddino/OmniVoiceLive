@@ -183,10 +183,26 @@ class LiveTTSConfig:
     tts_startup_anchor_text: str
     tts_reference_audio: str
     tts_reference_text: str
+    tts_reference_preprocess: bool
+
+    qwen_tts_model: str
+    qwen_tts_mode: str
+    qwen_tts_speaker: str
+    qwen_tts_instruct: str
+    qwen_tts_device_map: str
+    qwen_tts_dtype: str
+    qwen_tts_attn_implementation: str
+
+    ctc_tts_url: str
+    ctc_tts_voice: str
+    ctc_tts_sample_rate: int
+    ctc_tts_timeout_s: float
 
     stt_backend: str
     stt_url: str
     stt_language: str
+    stt_lead_padding_ms: int
+    stt_tail_padding_ms: int
     whisper_model: str
     whisper_device: str
     whisper_compute_type: str
@@ -259,7 +275,7 @@ class LiveTTSConfig:
             tts_temperature=_env_float("LIVE_TTS_TEMPERATURE", 0.0),
             tts_seed=_env_optional_int("LIVE_TTS_SEED"),
             tts_position_temperature=_env_float(
-                "LIVE_TTS_POSITION_TEMPERATURE", 0.0
+                "LIVE_TTS_POSITION_TEMPERATURE", 0.35
             ),
             tts_class_temperature=_env_float("LIVE_TTS_CLASS_TEMPERATURE", 0.0),
             tts_postprocess_output=_env_bool("LIVE_TTS_POSTPROCESS_OUTPUT", False),
@@ -303,9 +319,36 @@ class LiveTTSConfig:
                     "tue esigenze e scegliamo insieme la soluzione piu adatta."
                 ),
             ),
+            tts_reference_preprocess=_env_bool(
+                "LIVE_TTS_REFERENCE_PREPROCESS", False
+            ),
+            qwen_tts_model=_env(
+                "LIVE_TTS_QWEN_MODEL",
+                "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+            ),
+            qwen_tts_mode=_env("LIVE_TTS_QWEN_MODE", "custom_voice"),
+            qwen_tts_speaker=_env("LIVE_TTS_QWEN_SPEAKER", "Aiden"),
+            qwen_tts_instruct=_env(
+                "LIVE_TTS_QWEN_INSTRUCT",
+                (
+                    "Speak in Italian with a warm, confident, lively call-center "
+                    "tone. Keep pronunciation clear and natural."
+                ),
+            ),
+            qwen_tts_device_map=_env("LIVE_TTS_QWEN_DEVICE_MAP", "cuda:0"),
+            qwen_tts_dtype=_env("LIVE_TTS_QWEN_DTYPE", "bfloat16"),
+            qwen_tts_attn_implementation=_env(
+                "LIVE_TTS_QWEN_ATTN_IMPLEMENTATION", ""
+            ),
+            ctc_tts_url=_env("LIVE_TTS_CTC_URL", ""),
+            ctc_tts_voice=_env("LIVE_TTS_CTC_VOICE", "default"),
+            ctc_tts_sample_rate=_env_int("LIVE_TTS_CTC_SAMPLE_RATE", 24000),
+            ctc_tts_timeout_s=_env_float("LIVE_TTS_CTC_TIMEOUT_S", 120.0),
             stt_backend=_env("LIVE_TTS_STT_BACKEND", "auto"),
             stt_url=_env("LIVE_TTS_STT_URL", ""),
             stt_language=_env("LIVE_TTS_STT_LANGUAGE", "it"),
+            stt_lead_padding_ms=_env_int("LIVE_TTS_STT_LEAD_PADDING_MS", 280),
+            stt_tail_padding_ms=_env_int("LIVE_TTS_STT_TAIL_PADDING_MS", 120),
             whisper_model=_env("LIVE_TTS_WHISPER_MODEL", "small"),
             whisper_device=_env("LIVE_TTS_WHISPER_DEVICE", "cuda"),
             whisper_compute_type=_env(
@@ -357,7 +400,7 @@ class LiveTTSConfig:
                 500,
             ),
             vad_min_turn_ms=_env_int("LIVE_TTS_VAD_MIN_TURN_MS", 320),
-            vad_preroll_ms=_env_int("LIVE_TTS_VAD_PREROLL_MS", 220),
+            vad_preroll_ms=_env_int("LIVE_TTS_VAD_PREROLL_MS", 700),
             vad_max_turn_s=_env_float("LIVE_TTS_VAD_MAX_TURN_S", 18.0),
             client_barge_threshold=_env_float(
                 "LIVE_TTS_CLIENT_BARGE_THRESHOLD", 0.022

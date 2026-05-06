@@ -31,6 +31,15 @@
               <option value="de">Deutsch</option>
             </select>
           </label>
+          <label class="languageControl engineControl">
+            <span>Engine TTS</span>
+            <select id="ttsEngineSelect">
+              <option value="omnivoice" selected>OmniVoice</option>
+              <option value="qwen3_tts">Qwen3-TTS</option>
+              <option value="ctc_tts">CTC-TTS</option>
+              <option value="mock">Mock</option>
+            </select>
+          </label>
           <div class="actions">
             <button id="startButton" class="primary">Avvia chiamata</button>
             <button id="stopButton" disabled>Termina</button>
@@ -88,6 +97,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=11" type="module"></script>
+    <script src="/static/app.js?v=13" type="module"></script>
   </body>
 </html>

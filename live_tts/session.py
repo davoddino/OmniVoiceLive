@@ -19,8 +19,8 @@ from live_tts.audio import (
     float32_to_wav_bytes,
     iter_pcm_frames,
     normalize_loudness_rms,
+    pad_audio_edges,
     pcm16_bytes_from_float32,
-    trim_low_amplitude_edges,
 )
 from live_tts.config import LiveTTSConfig
 from live_tts.llm import LLMStreamer
@@ -122,6 +122,8 @@ class RealtimeSession:
             session_id=self.session_id,
             tts_sample_rate=self.tts.sample_rate,
             tts_frame_ms=self.config.tts_frame_ms,
+            tts_engine=self._tts_engine_status(),
+            tts_engines=self._tts_engines(),
             language=self.language,
             languages=SUPPORTED_LANGUAGES,
             client_barge_threshold=self.config.client_barge_threshold,
@@ -161,11 +163,10 @@ class RealtimeSession:
         if msg_type == "session.start":
             sample_rate = int(data.get("sample_rate") or 48000)
             self.language = self._normalize_language(data.get("language"))
-            self.voice_config = VoiceSessionConfig.from_config(
-                self.config,
-                self.tts.sample_rate,
-                language=self.language,
-            )
+            selected_engine = str(data.get("tts_engine") or "").strip()
+            if selected_engine and not await self._select_tts_engine(selected_engine):
+                return
+            self._refresh_tts_runtime_state()
             self.detector.set_sample_rate(sample_rate)
             await self.recorder.start(
                 input_sample_rate=sample_rate,
@@ -187,12 +188,22 @@ class RealtimeSession:
                 sample_rate=sample_rate,
                 language=self.language,
                 language_label=SUPPORTED_LANGUAGES[self.language],
+                tts_sample_rate=self.tts.sample_rate,
+                tts_engine=self._tts_engine_status(),
                 recording_dir=(
                     str(self.recorder.paths.root)
                     if self.recorder.paths is not None
                     else ""
                 ),
             )
+        elif msg_type == "tts.engine.select":
+            engine = str(data.get("engine") or "").strip()
+            if not engine:
+                await self.send_event("error", message="Missing TTS engine id.")
+                return
+            await self.cancel_current_turn("tts_engine_select")
+            self.detector.reset()
+            await self._select_tts_engine(engine)
         elif msg_type == "barge_in":
             logger.info(
                 "barge_in received session_id=%s active_turn_id=%s",
@@ -208,6 +219,85 @@ class RealtimeSession:
             await self.websocket.close()
         else:
             await self.send_event("error", message=f"Unsupported message type: {msg_type}")
+
+    async def _select_tts_engine(self, engine: str) -> bool:
+        selector = getattr(self.tts, "select_engine", None)
+        if selector is None:
+            await self.send_event(
+                "tts.engine.ready",
+                **self._tts_engine_status(),
+                tts_sample_rate=self.tts.sample_rate,
+                tts_engines=self._tts_engines(),
+            )
+            return True
+
+        await self.send_event(
+            "tts.engine.loading",
+            engine=engine,
+            tts_engines=self._tts_engines(),
+        )
+        try:
+            status = await selector(engine)
+        except Exception as exc:
+            await self.send_event(
+                "tts.engine.error",
+                engine=engine,
+                message=str(exc),
+                tts_engines=self._tts_engines(),
+            )
+            return False
+
+        self._refresh_tts_runtime_state()
+        self.recorder.event(
+            "tts_engine_selected",
+            engine=status.get("engine"),
+            sample_rate=self.tts.sample_rate,
+        )
+        await self.send_event(
+            "tts.engine.ready",
+            **status,
+            tts_sample_rate=self.tts.sample_rate,
+            tts_engines=self._tts_engines(),
+            voice_config=self.voice_config.as_dict(),
+        )
+        return True
+
+    def _refresh_tts_runtime_state(self) -> None:
+        engine_status = self._tts_engine_status()
+        engine = str(engine_status.get("engine") or self.config.tts_backend)
+        self.voice_config = VoiceSessionConfig.from_config(
+            self.config,
+            self.tts.sample_rate,
+            language=self.language,
+            provider=engine,
+            voice_id=engine,
+        )
+        self.tts_session_state = self.tts.create_turn_state()
+
+    def _tts_engine_status(self) -> dict[str, object]:
+        status = getattr(self.tts, "status", None)
+        if status is not None:
+            return status()
+        return {
+            "engine": self.config.tts_backend,
+            "status": "ready",
+            "sample_rate": self.tts.sample_rate,
+            "error": "",
+        }
+
+    def _tts_engines(self) -> list[dict[str, object]]:
+        engines = getattr(self.tts, "engines", None)
+        if engines is not None:
+            return engines()
+        return [
+            {
+                "id": self.config.tts_backend,
+                "label": self.config.tts_backend,
+                "description": "Configured TTS backend.",
+                "kind": "local",
+                "status": "ready",
+            }
+        ]
 
     async def _handle_audio_bytes(self, raw: bytes) -> None:
         if len(raw) < 4 or len(raw) % 4 != 0:
@@ -276,14 +366,22 @@ class RealtimeSession:
             self.recorder.note_turn()
             self.recorder.event("turn_started", turn_id=turn_id)
             await self.send_event("turn.started", turn_id=turn_id)
-            clean_samples = trim_low_amplitude_edges(
+            stt_samples = pad_audio_edges(
                 samples,
                 sample_rate,
-                threshold=1e-4,
-                max_trim_ms=300,
-                keep_ms=40,
+                lead_ms=self.config.stt_lead_padding_ms,
+                tail_ms=self.config.stt_tail_padding_ms,
             )
-            wav_bytes = float32_to_wav_bytes(clean_samples, sample_rate)
+            logger.info(
+                "stt input session_id=%s turn_id=%s raw_duration_ms=%s padded_duration_ms=%s lead_padding_ms=%s tail_padding_ms=%s",
+                self.session_id,
+                turn_id,
+                int(samples.size / sample_rate * 1000),
+                int(stt_samples.size / sample_rate * 1000),
+                self.config.stt_lead_padding_ms,
+                self.config.stt_tail_padding_ms,
+            )
+            wav_bytes = float32_to_wav_bytes(stt_samples, sample_rate)
 
             stt_started = time.monotonic()
             stt_result = await self.stt.transcribe(

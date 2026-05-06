@@ -43,6 +43,27 @@ def float32_to_wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
     return out.getvalue()
 
 
+def pad_audio_edges(
+    samples: np.ndarray,
+    sample_rate: int,
+    lead_ms: int = 0,
+    tail_ms: int = 0,
+) -> np.ndarray:
+    mono = ensure_mono_float32(samples)
+    lead_samples = max(0, int(sample_rate * lead_ms / 1000))
+    tail_samples = max(0, int(sample_rate * tail_ms / 1000))
+    if lead_samples <= 0 and tail_samples <= 0:
+        return mono
+
+    parts: list[np.ndarray] = []
+    if lead_samples > 0:
+        parts.append(np.zeros(lead_samples, dtype=np.float32))
+    parts.append(mono)
+    if tail_samples > 0:
+        parts.append(np.zeros(tail_samples, dtype=np.float32))
+    return np.concatenate(parts).astype(np.float32, copy=False)
+
+
 def pcm16_bytes_from_float32(samples: np.ndarray) -> bytes:
     mono = ensure_mono_float32(samples)
     pcm = (mono * 32767.0).clip(-32768, 32767).astype("<i2")

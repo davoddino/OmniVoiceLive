@@ -123,6 +123,10 @@ p {
   min-width: 136px;
 }
 
+.engineControl {
+  min-width: 158px;
+}
+
 .languageControl span {
   color: var(--muted);
   font-size: 11px;

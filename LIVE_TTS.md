@@ -181,16 +181,17 @@ LIVE_TTS_VOICE_MODE=fixed_reference
 LIVE_TTS_VOICE_ID=cavadalabs_it_male_calm_v1
 LIVE_TTS_REFERENCE_AUDIO=voice_candidates/14.wav
 LIVE_TTS_REFERENCE_TEXT=Ciao! Certo, ti aiuto volentieri. Con CavadaLabs possiamo creare un chatbot per il tuo sito, collegarlo ai contenuti aziendali e renderlo semplice da aggiornare. Partiamo dalle tue esigenze e scegliamo insieme la soluzione piu adatta.
+LIVE_TTS_REFERENCE_PREPROCESS=false
 LIVE_TTS_NUM_STEP_FIRST=40
 LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.05
-LIVE_TTS_GUIDANCE_SCALE=2.0
+LIVE_TTS_GUIDANCE_SCALE=2.2
 LIVE_TTS_STABILITY=0.90
 LIVE_TTS_SIMILARITY_BOOST=0.80
 LIVE_TTS_STYLE=0.15
 LIVE_TTS_TEMPERATURE=0.0
 LIVE_TTS_SEED=14
-LIVE_TTS_POSITION_TEMPERATURE=1.0
+LIVE_TTS_POSITION_TEMPERATURE=0.35
 LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_POSTPROCESS_OUTPUT=false
 LIVE_TTS_DENOISE=true
@@ -206,9 +207,24 @@ LIVE_TTS_SESSION_VOICE_ANCHOR=false
 LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 LIVE_TTS_STARTUP_ANCHOR_TEXT=Parlo in italiano con voce maschile, calma, chiara e professionale.
 
+LIVE_TTS_QWEN_MODEL=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+LIVE_TTS_QWEN_MODE=custom_voice
+LIVE_TTS_QWEN_SPEAKER=Aiden
+LIVE_TTS_QWEN_INSTRUCT=Speak in Italian with a warm, confident, lively call-center tone. Keep pronunciation clear and natural.
+LIVE_TTS_QWEN_DEVICE_MAP=cuda:0
+LIVE_TTS_QWEN_DTYPE=bfloat16
+LIVE_TTS_QWEN_ATTN_IMPLEMENTATION=
+
+LIVE_TTS_CTC_URL=
+LIVE_TTS_CTC_VOICE=default
+LIVE_TTS_CTC_SAMPLE_RATE=24000
+LIVE_TTS_CTC_TIMEOUT_S=120
+
 LIVE_TTS_STT_BACKEND=auto
 LIVE_TTS_STT_URL=
 LIVE_TTS_STT_LANGUAGE=it
+LIVE_TTS_STT_LEAD_PADDING_MS=280
+LIVE_TTS_STT_TAIL_PADDING_MS=120
 LIVE_TTS_WHISPER_MODEL=small
 LIVE_TTS_WHISPER_DEVICE=cuda
 LIVE_TTS_WHISPER_COMPUTE_TYPE=int8_float16
@@ -233,6 +249,7 @@ LIVE_TTS_VAD_MIN_SPEECH_MS=180
 LIVE_TTS_VAD_END_SILENCE_MS=500
 LIVE_TTS_VAD_START_MS=180
 LIVE_TTS_VAD_END_MS=500
+LIVE_TTS_VAD_PREROLL_MS=700
 
 LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.022
 LIVE_TTS_CLIENT_BARGE_STOP_MS=80
@@ -257,6 +274,12 @@ chiamata. Il browser invia `language` in `session.start`; il backend la usa per
 Whisper, per l'istruzione LLM e per OmniVoice. Se usi `whisper.py` come server
 HTTP, anche `/transcribe` accetta il campo form `language`, quindi non resta in
 auto-detect.
+
+Per non perdere l'attacco delle frasi, il browser conserva un piccolo preroll di
+microfono anche mentre il WebSocket si sta aprendo. Il server aggiunge poi 280 ms
+di silenzio prima dell'audio passato a Whisper e mantiene 700 ms di preroll VAD.
+Questi valori non rendono il barge-in piu' sensibile: servono solo a non tagliare
+le prime sillabe.
 
 Per testare solo trasporto audio e UI senza GPU:
 
@@ -284,6 +307,46 @@ Per microfono e autoplay in produzione va servito dietro HTTPS. In locale i brow
 accettano normalmente `localhost`/`127.0.0.1` come secure context per il microfono.
 Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 
+## Selettore Engine TTS
+
+L'interfaccia espone un selettore per confrontare engine diversi mantenendo uguali
+STT, LLM, prompt, segmenter, VAD, barge-in e player. Il server carica un solo
+engine alla volta in GPU:
+
+- `OmniVoice`: default, caricato all'avvio.
+- `Qwen3-TTS`: opzionale, caricato solo quando selezionato.
+- `CTC-TTS`: worker HTTP esterno sperimentale.
+- `Mock`: test di trasporto senza GPU.
+
+Quando cambi engine, il turno corrente viene cancellato, il modello precedente
+viene scaricato, la GPU viene liberata e l'interfaccia mostra `loading`, `ready`
+o `failed`. L'audio del microfono viene messo in pausa durante il caricamento e
+riparte quando l'engine e' pronto.
+
+Le dipendenze dei nuovi modelli stanno in un file separato:
+
+```bash
+uv pip install -r more_requirement.txt
+```
+
+Qwen3-TTS usa di default il modello `0.6B-CustomVoice` per ridurre il rischio di
+OOM. Per provare voice design invece dei preset:
+
+```text
+LIVE_TTS_QWEN_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+LIVE_TTS_QWEN_MODE=voice_design
+LIVE_TTS_QWEN_INSTRUCT=Speak in Italian with a warm, confident, lively call-center tone.
+```
+
+CTC-TTS non viene caricato in-process: configura un worker che accetti `POST`
+JSON con `text`, `language`, `voice` e `sample_rate`, e risponda con WAV bytes,
+`audio_base64`, `wav_base64`, `pcm16_base64` o `samples`.
+
+```text
+LIVE_TTS_CTC_URL=http://127.0.0.1:8030/synthesize
+LIVE_TTS_CTC_SAMPLE_RATE=24000
+```
+
 ## Stabilita' Del Timbro
 
 La modalita' consigliata e' `fixed_reference`: il file `voice_candidates/14.wav`
@@ -296,15 +359,16 @@ di voce.
 LIVE_TTS_VOICE_MODE=fixed_reference
 LIVE_TTS_REFERENCE_AUDIO=voice_candidates/14.wav
 LIVE_TTS_REFERENCE_TEXT=Ciao! Certo, ti aiuto volentieri. Con CavadaLabs possiamo creare un chatbot per il tuo sito, collegarlo ai contenuti aziendali e renderlo semplice da aggiornare. Partiamo dalle tue esigenze e scegliamo insieme la soluzione piu adatta.
+LIVE_TTS_REFERENCE_PREPROCESS=false
 LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
 LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 LIVE_TTS_SESSION_VOICE_ANCHOR=false
 LIVE_TTS_NUM_STEP_FIRST=40
 LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.05
-LIVE_TTS_GUIDANCE_SCALE=2.0
+LIVE_TTS_GUIDANCE_SCALE=2.2
 LIVE_TTS_SEED=14
-LIVE_TTS_POSITION_TEMPERATURE=1.0
+LIVE_TTS_POSITION_TEMPERATURE=0.35
 LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_LOUDNESS_NORMALIZATION=true
 LIVE_TTS_CROSSFADE_MS=20
@@ -314,6 +378,11 @@ In `fixed_reference` l'`instruct` serve soprattutto come documentazione del prof
 scelto e per rigenerare candidati simili. Durante la sintesi live il riferimento
 audio e' il condizionamento principale, cosi' evitiamo che il voice-design venga
 riestrato diversamente a ogni chunk.
+
+`LIVE_TTS_REFERENCE_PREPROCESS=false` mantiene il file 14 esattamente come e'
+stato generato. `LIVE_TTS_POSITION_TEMPERATURE=0.35` riduce la varianza tra
+chunk; se vuoi una voce piu' vivace puoi salire verso `0.6`, se vuoi massima
+coerenza puoi scendere verso `0.15`.
 
 Se `voice_candidates/14.wav` non esiste ancora sulla macchina di avvio:
 

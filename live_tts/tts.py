@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import gc
+import io
 import logging
 import math
 import random
@@ -32,6 +35,9 @@ class BaseTTS(ABC):
     sample_rate: int = 24000
 
     async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
         return None
 
     def create_turn_state(self) -> TTSTurnState:
@@ -73,6 +79,14 @@ class MockTTS(BaseTTS):
             envelope[-fade:] = np.linspace(1.0, 0.0, fade)
         await asyncio.sleep(0.04 if first else 0.08)
         return (wave * envelope).astype(np.float32)
+
+
+@dataclass(frozen=True)
+class TTSEngineDefinition:
+    id: str
+    label: str
+    description: str
+    kind: str
 
 
 class OmniVoiceTTS(BaseTTS):
@@ -148,6 +162,16 @@ class OmniVoiceTTS(BaseTTS):
                 voice_config=voice_config,
             )
         logger.info("omnivoice ready sample_rate=%s", self.sample_rate)
+
+    async def close(self) -> None:
+        self.model = None
+        self._startup_voice_prompt = None
+        self._fixed_reference_voice_prompt = None
+        self._startup_anchor_text = ""
+        self._fixed_reference_text = ""
+        self._startup_anchor_duration_s = 0.0
+        self._fixed_reference_duration_s = 0.0
+        await asyncio.to_thread(_release_torch_memory)
 
     def create_turn_state(self) -> TTSTurnState:
         if (
@@ -233,7 +257,7 @@ class OmniVoiceTTS(BaseTTS):
         self._fixed_reference_voice_prompt = self.model.create_voice_clone_prompt(
             ref_audio=str(ref_audio_path),
             ref_text=ref_text,
-            preprocess_prompt=True,
+            preprocess_prompt=self.config.tts_reference_preprocess,
         )
         self._clear_cuda_cache()
         self._fixed_reference_text = ref_text
@@ -427,13 +451,337 @@ class OmniVoiceTTS(BaseTTS):
         )
 
 
+class Qwen3TTS(BaseTTS):
+    def __init__(self, config: LiveTTSConfig) -> None:
+        self.config = config
+        self.model = None
+        self.sample_rate = 24000
+        self._lock = threading.Lock()
+
+    async def start(self) -> None:
+        logger.info(
+            "qwen3_tts loading model=%s mode=%s speaker=%s device_map=%s",
+            self.config.qwen_tts_model,
+            self.config.qwen_tts_mode,
+            self.config.qwen_tts_speaker,
+            self.config.qwen_tts_device_map,
+        )
+        await asyncio.to_thread(self._load_model)
+        if self.config.tts_warmup_enabled:
+            logger.info("qwen3_tts warmup text=%r", self.config.tts_warmup_text)
+            await self.synthesize(self.config.tts_warmup_text, first=True)
+        logger.info("qwen3_tts ready sample_rate=%s", self.sample_rate)
+
+    async def close(self) -> None:
+        self.model = None
+        await asyncio.to_thread(_release_torch_memory)
+
+    async def synthesize(
+        self,
+        text: str,
+        first: bool,
+        state: TTSTurnState | None = None,
+        language: str | None = None,
+        voice_config: VoiceSessionConfig | None = None,
+    ) -> np.ndarray:
+        return await asyncio.to_thread(self._synthesize_sync, text, language)
+
+    def _load_model(self) -> None:
+        if self.model is not None:
+            return
+        try:
+            import torch
+            from qwen_tts import Qwen3TTSModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "Qwen3-TTS is not installed. Install optional TTS dependencies "
+                "with: uv pip install -r more_requirement.txt"
+            ) from exc
+
+        kwargs: dict[str, Any] = {
+            "device_map": self.config.qwen_tts_device_map,
+            "dtype": _resolve_torch_dtype(torch, self.config.qwen_tts_dtype),
+        }
+        attn_impl = self.config.qwen_tts_attn_implementation.strip()
+        if attn_impl:
+            kwargs["attn_implementation"] = attn_impl
+        self.model = Qwen3TTSModel.from_pretrained(
+            self.config.qwen_tts_model,
+            **kwargs,
+        )
+
+    def _synthesize_sync(self, text: str, language: str | None) -> np.ndarray:
+        if self.model is None:
+            self._load_model()
+        assert self.model is not None
+
+        qwen_language = _qwen_language(language or self.config.tts_language)
+        mode = self.config.qwen_tts_mode.strip().lower().replace("-", "_")
+        instruct = self.config.qwen_tts_instruct.strip()
+        with self._lock:
+            if mode in {"voice_design", "design"}:
+                if not hasattr(self.model, "generate_voice_design"):
+                    raise RuntimeError(
+                        "The selected Qwen3-TTS model does not expose "
+                        "generate_voice_design(). Use a VoiceDesign model or "
+                        "LIVE_TTS_QWEN_MODE=custom_voice."
+                    )
+                wavs, sample_rate = self.model.generate_voice_design(
+                    text=text,
+                    language=qwen_language,
+                    instruct=instruct,
+                )
+            elif mode in {"custom_voice", "voice", "speaker"}:
+                if not hasattr(self.model, "generate_custom_voice"):
+                    raise RuntimeError(
+                        "The selected Qwen3-TTS model does not expose "
+                        "generate_custom_voice(). Use a CustomVoice model or "
+                        "LIVE_TTS_QWEN_MODE=voice_design."
+                    )
+                wavs, sample_rate = self.model.generate_custom_voice(
+                    text=text,
+                    language=qwen_language,
+                    speaker=self.config.qwen_tts_speaker,
+                    instruct=instruct,
+                )
+            else:
+                raise RuntimeError(
+                    "Unsupported LIVE_TTS_QWEN_MODE. Use custom_voice or voice_design."
+                )
+
+        self.sample_rate = int(sample_rate or self.sample_rate)
+        waveform = _first_waveform(wavs)
+        waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
+        waveform = apply_edge_fade(waveform, self.sample_rate)
+        return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
+
+
+class CTCTTSWorker(BaseTTS):
+    def __init__(self, config: LiveTTSConfig) -> None:
+        self.config = config
+        self.sample_rate = max(1, config.ctc_tts_sample_rate)
+
+    async def start(self) -> None:
+        if not self.config.ctc_tts_url.strip():
+            raise RuntimeError(
+                "CTC-TTS is configured as an external worker. Set "
+                "LIVE_TTS_CTC_URL to enable it."
+            )
+        if self.config.tts_warmup_enabled:
+            logger.info("ctc_tts worker warmup text=%r", self.config.tts_warmup_text)
+            await self.synthesize(self.config.tts_warmup_text, first=True)
+        logger.info("ctc_tts worker ready sample_rate=%s", self.sample_rate)
+
+    async def synthesize(
+        self,
+        text: str,
+        first: bool,
+        state: TTSTurnState | None = None,
+        language: str | None = None,
+        voice_config: VoiceSessionConfig | None = None,
+    ) -> np.ndarray:
+        return await asyncio.to_thread(self._synthesize_sync, text, language)
+
+    def _synthesize_sync(self, text: str, language: str | None) -> np.ndarray:
+        import requests
+
+        payload = {
+            "text": text,
+            "language": language or self.config.tts_language,
+            "voice": self.config.ctc_tts_voice,
+            "sample_rate": self.sample_rate,
+        }
+        response = requests.post(
+            self.config.ctc_tts_url,
+            json=payload,
+            timeout=self.config.ctc_tts_timeout_s,
+        )
+        response.raise_for_status()
+        waveform, sample_rate = _decode_tts_worker_response(response)
+        if sample_rate:
+            self.sample_rate = int(sample_rate)
+        waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
+        waveform = apply_edge_fade(waveform, self.sample_rate)
+        return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
+
+
+class TTSEngineManager(BaseTTS):
+    def __init__(self, config: LiveTTSConfig) -> None:
+        self.config = config
+        self.sample_rate = 24000
+        self._active_name = ""
+        self._active: BaseTTS | None = None
+        self._status = "unloaded"
+        self._error = ""
+        self._loading_started_at = 0.0
+        self._lock = asyncio.Lock()
+        self._synthesize_lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        await self.select_engine(self.config.tts_backend)
+
+    async def close(self) -> None:
+        async with self._lock:
+            await self._close_active()
+            self._status = "unloaded"
+
+    def create_turn_state(self) -> TTSTurnState:
+        if self._active is None:
+            return TTSTurnState()
+        return self._active.create_turn_state()
+
+    async def synthesize(
+        self,
+        text: str,
+        first: bool,
+        state: TTSTurnState | None = None,
+        language: str | None = None,
+        voice_config: VoiceSessionConfig | None = None,
+    ) -> np.ndarray:
+        async with self._synthesize_lock:
+            if self._active is None or self._status != "ready":
+                raise RuntimeError("TTS engine is not ready.")
+            waveform = await self._active.synthesize(
+                text,
+                first,
+                state=state,
+                language=language,
+                voice_config=voice_config,
+            )
+            self.sample_rate = self._active.sample_rate
+            return waveform
+
+    async def select_engine(self, name: str) -> dict[str, object]:
+        engine_name = normalize_tts_engine(name)
+        async with self._lock:
+            if (
+                self._active is not None
+                and self._active_name == engine_name
+                and self._status == "ready"
+            ):
+                return self.status()
+
+            async with self._synthesize_lock:
+                await self._close_active()
+                self._active_name = engine_name
+                self._status = "loading"
+                self._error = ""
+                self._loading_started_at = asyncio.get_running_loop().time()
+                logger.info("tts engine loading engine=%s", engine_name)
+                try:
+                    engine = create_tts_engine(self.config, engine_name)
+                    await engine.start()
+                except Exception as exc:
+                    self._active = None
+                    self._status = "failed"
+                    self._error = str(exc)
+                    logger.exception("tts engine failed engine=%s", engine_name)
+                    raise
+                self._active = engine
+                self.sample_rate = engine.sample_rate
+                self._status = "ready"
+                logger.info(
+                    "tts engine ready engine=%s sample_rate=%s",
+                    engine_name,
+                    self.sample_rate,
+                )
+                return self.status()
+
+    def status(self) -> dict[str, object]:
+        return {
+            "engine": self._active_name or normalize_tts_engine(self.config.tts_backend),
+            "status": self._status,
+            "sample_rate": self.sample_rate,
+            "error": self._error,
+        }
+
+    def engines(self) -> list[dict[str, str]]:
+        active = self._active_name or normalize_tts_engine(self.config.tts_backend)
+        result = []
+        for definition in TTS_ENGINE_DEFINITIONS:
+            result.append(
+                {
+                    "id": definition.id,
+                    "label": definition.label,
+                    "description": definition.description,
+                    "kind": definition.kind,
+                    "status": self._status if definition.id == active else "unloaded",
+                }
+            )
+        return result
+
+    async def _close_active(self) -> None:
+        if self._active is None:
+            return
+        old_name = self._active_name
+        old = self._active
+        self._active = None
+        self._status = "unloading"
+        logger.info("tts engine unloading engine=%s", old_name)
+        await old.close()
+        await asyncio.to_thread(_release_torch_memory)
+        logger.info("tts engine unloaded engine=%s", old_name)
+
+
+TTS_ENGINE_DEFINITIONS = [
+    TTSEngineDefinition(
+        id="omnivoice",
+        label="OmniVoice",
+        description="Default locale con reference sintetica scelta.",
+        kind="local",
+    ),
+    TTSEngineDefinition(
+        id="qwen3_tts",
+        label="Qwen3-TTS",
+        description="Engine opzionale Qwen, caricato solo quando selezionato.",
+        kind="local_optional",
+    ),
+    TTSEngineDefinition(
+        id="ctc_tts",
+        label="CTC-TTS",
+        description="Worker esterno sperimentale per dual-streaming CTC.",
+        kind="external_worker",
+    ),
+    TTSEngineDefinition(
+        id="mock",
+        label="Mock",
+        description="Senoide locale per test di trasporto.",
+        kind="local_test",
+    ),
+]
+
+
 def create_tts(config: LiveTTSConfig) -> BaseTTS:
-    backend = config.tts_backend.strip().lower()
+    return TTSEngineManager(config)
+
+
+def create_tts_engine(config: LiveTTSConfig, engine: str) -> BaseTTS:
+    backend = normalize_tts_engine(engine)
+    if backend == "qwen3_tts":
+        return Qwen3TTS(config)
+    if backend == "ctc_tts":
+        return CTCTTSWorker(config)
     if backend == "mock":
         return MockTTS()
     if backend == "omnivoice":
         return OmniVoiceTTS(config)
-    raise ValueError(f"Unsupported LIVE_TTS_TTS_BACKEND: {config.tts_backend}")
+    raise ValueError(
+        "Unsupported TTS engine. Use omnivoice, qwen3_tts, ctc_tts, or mock."
+    )
+
+
+def normalize_tts_engine(value: str) -> str:
+    engine = str(value or "omnivoice").strip().lower().replace("-", "_")
+    aliases = {
+        "qwen": "qwen3_tts",
+        "qwen_tts": "qwen3_tts",
+        "qwen3": "qwen3_tts",
+        "ctc": "ctc_tts",
+        "ctc_tts_worker": "ctc_tts",
+        "omni": "omnivoice",
+        "omni_voice": "omnivoice",
+    }
+    return aliases.get(engine, engine)
 
 
 def _resolve_path(value: str) -> Path:
@@ -453,3 +801,106 @@ def _audio_duration_seconds(path: Path) -> float:
     except Exception:
         logger.debug("unable to read reference audio duration", exc_info=True)
     return 0.0
+
+
+def _resolve_torch_dtype(torch_module, value: str):
+    normalized = value.strip().lower()
+    if normalized in {"float16", "fp16", "half"}:
+        return torch_module.float16
+    if normalized in {"bfloat16", "bf16"}:
+        return torch_module.bfloat16
+    if normalized in {"float32", "fp32"}:
+        return torch_module.float32
+    raise ValueError(f"Unsupported dtype: {value}")
+
+
+def _qwen_language(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    mapping = {
+        "it": "Italian",
+        "italian": "Italian",
+        "italiano": "Italian",
+        "en": "English",
+        "english": "English",
+        "es": "Spanish",
+        "spanish": "Spanish",
+        "fr": "French",
+        "french": "French",
+        "de": "German",
+        "german": "German",
+        "zh": "Chinese",
+        "cn": "Chinese",
+        "ja": "Japanese",
+        "jp": "Japanese",
+        "ko": "Korean",
+        "ru": "Russian",
+        "pt": "Portuguese",
+    }
+    return mapping.get(normalized, value or "Italian")
+
+
+def _first_waveform(wavs: Any) -> np.ndarray:
+    first = wavs[0] if isinstance(wavs, (list, tuple)) else wavs
+    if hasattr(first, "detach"):
+        first = first.detach().cpu().numpy()
+    waveform = np.asarray(first, dtype=np.float32)
+    if waveform.ndim == 2:
+        waveform = (
+            waveform.mean(axis=0)
+            if waveform.shape[0] <= waveform.shape[1]
+            else waveform.mean(axis=1)
+        )
+    return waveform.reshape(-1).astype(np.float32, copy=False)
+
+
+def _decode_tts_worker_response(response: Any) -> tuple[np.ndarray, int | None]:
+    content_type = response.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        data = response.json()
+        sample_rate = int(data.get("sample_rate") or 0) or None
+        if data.get("pcm16_base64"):
+            raw = base64.b64decode(data["pcm16_base64"])
+            pcm = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+            return pcm.astype(np.float32, copy=False), sample_rate
+        encoded_audio = data.get("audio_base64") or data.get("wav_base64")
+        if encoded_audio:
+            return _read_audio_bytes(base64.b64decode(encoded_audio))
+        if data.get("samples") is not None:
+            return np.asarray(data["samples"], dtype=np.float32).reshape(-1), sample_rate
+        raise RuntimeError(
+            "CTC-TTS worker JSON must include audio_base64, wav_base64, "
+            "pcm16_base64, or samples."
+        )
+    return _read_audio_bytes(response.content)
+
+
+def _read_audio_bytes(payload: bytes) -> tuple[np.ndarray, int | None]:
+    try:
+        import soundfile as sf
+
+        data, sample_rate = sf.read(
+            io.BytesIO(payload),
+            dtype="float32",
+            always_2d=False,
+        )
+        waveform = np.asarray(data, dtype=np.float32)
+        if waveform.ndim == 2:
+            waveform = waveform.mean(axis=1)
+        return waveform.reshape(-1), int(sample_rate)
+    except Exception:
+        if len(payload) % 2 != 0:
+            raise RuntimeError("TTS worker returned unsupported audio bytes.")
+        pcm = np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
+        return pcm.astype(np.float32, copy=False), None
+
+
+def _release_torch_memory() -> None:
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        logger.debug("torch memory cleanup failed", exc_info=True)
