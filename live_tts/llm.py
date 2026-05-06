@@ -7,6 +7,7 @@ import time
 from typing import AsyncIterator
 
 from live_tts.config import LiveTTSConfig
+from live_tts.rag import rag_system_message
 from live_tts.segmenter import clean_stream_text
 
 
@@ -20,9 +21,10 @@ class LLMStreamer:
         history: list[dict[str, str]],
         cancel_event: threading.Event,
         language: str | None = None,
+        rag_context: str = "",
     ) -> AsyncIterator[str]:
         if self.config.llm_backend == "mock":
-            async for piece in self._mock_stream(prompt, cancel_event):
+            async for piece in self._mock_stream(prompt, cancel_event, rag_context):
                 yield piece
             return
 
@@ -34,17 +36,19 @@ class LLMStreamer:
             history,
             cancel_event,
             language,
+            rag_context,
         ):
             yield piece
 
     async def _mock_stream(
-        self, prompt: str, cancel_event: threading.Event
+        self,
+        prompt: str,
+        cancel_event: threading.Event,
+        rag_context: str = "",
     ) -> AsyncIterator[str]:
-        text = (
-            "Certo, ti aiuto subito. "
-            "Ho ricevuto la tua richiesta e posso guidarti passo per passo. "
-            "Dimmi pure qual e' il dettaglio piu' importante da cui vuoi partire."
-        )
+        text = "Certo, ti aiuto subito. Dimmi qual e' il punto principale."
+        if rag_context:
+            text = "Ho verificato le informazioni disponibili. Ti rispondo in modo sintetico."
         if "prezzo" in prompt.lower():
             text = (
                 "Certo. Per darti un prezzo corretto devo capire volume, canali "
@@ -62,6 +66,7 @@ class LLMStreamer:
         history: list[dict[str, str]],
         cancel_event: threading.Event,
         language: str | None,
+        rag_context: str,
     ) -> AsyncIterator[str]:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
@@ -81,6 +86,7 @@ class LLMStreamer:
                             "role": "system",
                             "content": language_instruction(language),
                         },
+                        *([rag_system_message(rag_context)] if rag_context else []),
                         *history[-10:],
                         {"role": "user", "content": prompt},
                     ],

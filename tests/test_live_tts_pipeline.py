@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+
+from live_tts.playback import drain_segment_queue
+from live_tts.rag import RAGRetriever
+from live_tts.recording import AsyncSessionRecorder
+from live_tts.segmenter import SentenceAccumulator, normalize_tts_text
+from live_tts.voice import VoiceSessionConfig
+
+
+class LiveTTSPipelineTests(unittest.TestCase):
+    def test_sentence_accumulator_uses_natural_boundaries_and_protects_values(self) -> None:
+        segmenter = SentenceAccumulator(
+            min_first_chars=70,
+            max_first_chars=150,
+            min_next_chars=70,
+            max_next_chars=150,
+            normalize_segments=False,
+        )
+        text = (
+            "Il codice cliente AB-12345 e la mail mario.rossi@example.com "
+            "devono restare leggibili. Poi posso fare una domanda breve."
+        )
+
+        segments: list[str] = []
+        for piece in (text[:55], text[55:92], text[92:]):
+            segments.extend(segmenter.push(piece))
+        segments.extend(segmenter.flush())
+
+        self.assertGreaterEqual(len(segments), 1)
+        self.assertIn("mario.rossi@example.com", " ".join(segments))
+        self.assertFalse(
+            any(
+                "mario.rossi@" in item and "example.com" not in item
+                for item in segments
+            )
+        )
+        self.assertTrue(segments[0].endswith("."))
+
+    def test_tts_text_normalization_removes_written_formatting(self) -> None:
+        text = "**Email**: test@example.com - tel. +39 333-1234567 😊 / ok"
+        normalized = normalize_tts_text(text)
+
+        self.assertNotIn("**", normalized)
+        self.assertNotIn("😊", normalized)
+        self.assertIn("chiocciola", normalized)
+        self.assertIn("punto", normalized)
+        self.assertIn("3 9", normalized)
+        self.assertIn("telefono", normalized)
+
+    def test_voice_session_config_is_stable(self) -> None:
+        config = voice_config_source()
+        first = VoiceSessionConfig.from_config(config, 24000, language="it")
+        second = VoiceSessionConfig.from_config(config, 24000, language="it")
+
+        self.assertEqual(first.as_dict(), second.as_dict())
+        self.assertEqual(first.voice_id, "voice-a")
+        self.assertEqual(first.position_temperature, 0.0)
+        self.assertEqual(first.seed, 42)
+
+    def test_tts_queue_drain_counts_cancelled_segments(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            queue.put_nowait("prima frase")
+            queue.put_nowait("seconda frase")
+            queue.put_nowait(None)
+
+            self.assertEqual(drain_segment_queue(queue), 2)
+            self.assertTrue(queue.empty())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
+class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_transcript_jsonl_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            recorder = AsyncSessionRecorder(recording_config(tmp), "session-test")
+            await recorder.start(
+                input_sample_rate=16000,
+                output_sample_rate=24000,
+                voice_config=VoiceSessionConfig.from_config(
+                    voice_config_source(),
+                    24000,
+                    language="it",
+                ),
+            )
+            recorder.transcript("user", "Buongiorno", turn_id=1, stt_ms=180)
+            recorder.record_input(np.zeros(160, dtype=np.float32))
+            recorder.record_output(np.zeros(240, dtype=np.float32))
+            await recorder.close()
+
+            transcript = Path(tmp).glob("*/call_session-test/transcript.jsonl")
+            transcript_path = next(transcript)
+            entries = [
+                json.loads(line)
+                for line in transcript_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(entries[0]["speaker"], "user")
+            self.assertEqual(entries[0]["stt_ms"], 180)
+
+    async def test_recording_enqueue_is_non_blocking_when_queue_is_full(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = recording_config(tmp)
+            config.recording_queue_size = 1
+            recorder = AsyncSessionRecorder(config, "queue-test")
+            await recorder.start(
+                input_sample_rate=16000,
+                output_sample_rate=24000,
+                voice_config=VoiceSessionConfig.from_config(
+                    voice_config_source(),
+                    24000,
+                    language="it",
+                ),
+            )
+            for index in range(30):
+                recorder.transcript("system", f"evento {index}")
+            await recorder.close()
+
+            self.assertGreaterEqual(recorder._dropped_items, 0)
+
+    async def test_rag_timeout_falls_back_to_llm(self) -> None:
+        class SlowRAGRetriever(RAGRetriever):
+            def _retrieve_sync(self, query, cancel_event=None):  # type: ignore[override]
+                time.sleep(0.05)
+                return []
+
+        config = rag_config()
+        retriever = SlowRAGRetriever(config)
+        result = await retriever.retrieve("Quanto costa il servizio chatbot?")
+
+        self.assertFalse(result.used)
+        self.assertTrue(result.timed_out)
+        self.assertLess(result.latency_ms, 100)
+
+
+def voice_config_source() -> SimpleNamespace:
+    return SimpleNamespace(
+        tts_backend="omnivoice",
+        tts_voice_id="voice-a",
+        tts_model="k2-fsa/OmniVoice",
+        tts_speed=1.05,
+        tts_stability=0.9,
+        tts_similarity_boost=0.8,
+        tts_style=0.15,
+        tts_temperature=0.0,
+        tts_seed=42,
+        tts_output_format="pcm16",
+        tts_loudness_target_lufs=-16.0,
+        tts_loudness_enabled=True,
+        tts_crossfade_ms=20,
+        tts_crossfade_enabled=True,
+        tts_guidance_scale=2.0,
+        tts_position_temperature=0.0,
+        tts_class_temperature=0.0,
+        tts_num_step_first=40,
+        tts_num_step_next=40,
+        tts_voice_mode="session_anchor",
+        tts_instruct="male, middle-aged, low pitch",
+        tts_language="it",
+    )
+
+
+def recording_config(path: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        recording_enabled=True,
+        recording_dir=path,
+        recording_queue_size=64,
+        recording_prebuffer_seconds=1.0,
+    )
+
+
+def rag_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        rag_enabled=True,
+        rag_docs_dir="missing",
+        rag_timeout_ms=1,
+        rag_max_chunks=3,
+        rag_max_context_chars=2500,
+    )

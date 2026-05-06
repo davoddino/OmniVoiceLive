@@ -15,6 +15,10 @@ import numpy as np
 class AudioEvent:
     type: Literal["speech_start", "speech_end", "meter"]
     rms: float = 0.0
+    noise_rms: float = 0.0
+    start_threshold: float = 0.0
+    continue_threshold: float = 0.0
+    in_speech: bool = False
     samples: np.ndarray | None = None
     sample_rate: int | None = None
     duration_ms: int = 0
@@ -90,6 +94,75 @@ def apply_edge_fade(samples: np.ndarray, sample_rate: int, fade_ms: int = 8) -> 
     return mono
 
 
+def normalize_loudness_rms(
+    samples: np.ndarray,
+    target_lufs: float = -16.0,
+    enabled: bool = True,
+    max_gain_db: float = 9.0,
+    min_gain_db: float = -12.0,
+    peak_limit: float = 0.98,
+) -> np.ndarray:
+    mono = ensure_mono_float32(samples)
+    if not enabled or mono.size == 0:
+        return mono
+
+    active = mono[np.abs(mono) > 1e-4]
+    if active.size < max(16, mono.size // 100):
+        active = mono
+    rms = float(math.sqrt(float(np.mean(active * active)) + 1e-12))
+    if rms <= 1e-6:
+        return mono
+
+    target_rms = 10.0 ** (target_lufs / 20.0)
+    gain = target_rms / rms
+    min_gain = 10.0 ** (min_gain_db / 20.0)
+    max_gain = 10.0 ** (max_gain_db / 20.0)
+    gain = min(max(gain, min_gain), max_gain)
+    normalized = mono * gain
+    peak = float(np.max(np.abs(normalized))) if normalized.size else 0.0
+    if peak > peak_limit:
+        normalized = normalized * (peak_limit / peak)
+    return np.clip(normalized, -1.0, 1.0).astype(np.float32, copy=False)
+
+
+class AudioCrossfader:
+    def __init__(self, sample_rate: int, crossfade_ms: int) -> None:
+        self.sample_rate = sample_rate
+        self.crossfade_samples = max(0, int(sample_rate * crossfade_ms / 1000))
+        self._tail: np.ndarray | None = None
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        mono = ensure_mono_float32(samples)
+        n = self.crossfade_samples
+        if n <= 0 or mono.size <= n * 2:
+            if self._tail is None:
+                return mono
+            out = np.concatenate([self._tail, mono]).astype(np.float32, copy=False)
+            self._tail = None
+            return out
+
+        if self._tail is None:
+            self._tail = mono[-n:].copy()
+            return mono[:-n].astype(np.float32, copy=False)
+
+        n = min(n, self._tail.size, mono.size // 2)
+        fade_out = np.linspace(1.0, 0.0, n, dtype=np.float32)
+        fade_in = np.linspace(0.0, 1.0, n, dtype=np.float32)
+        cross = self._tail[-n:] * fade_out + mono[:n] * fade_in
+        body = mono[n:-n]
+        self._tail = mono[-n:].copy()
+        if body.size:
+            return np.concatenate([cross, body]).astype(np.float32, copy=False)
+        return cross.astype(np.float32, copy=False)
+
+    def flush(self) -> np.ndarray:
+        if self._tail is None:
+            return np.zeros(0, dtype=np.float32)
+        tail = self._tail
+        self._tail = None
+        return tail.astype(np.float32, copy=False)
+
+
 class AudioTurnDetector:
     def __init__(
         self,
@@ -100,6 +173,10 @@ class AudioTurnDetector:
         min_turn_ms: int,
         preroll_ms: int,
         max_turn_s: float,
+        adaptive: bool = True,
+        noise_calibration_ms: int = 1000,
+        start_multiplier: float = 2.2,
+        continue_multiplier: float = 1.4,
     ) -> None:
         self.sample_rate = sample_rate
         self.speech_threshold = speech_threshold
@@ -108,7 +185,14 @@ class AudioTurnDetector:
         self.min_turn_ms = min_turn_ms
         self.preroll_ms = preroll_ms
         self.max_turn_s = max_turn_s
+        self.adaptive = adaptive
+        self.noise_calibration_ms = noise_calibration_ms
+        self.start_multiplier = start_multiplier
+        self.continue_multiplier = continue_multiplier
         self._last_meter_at = 0.0
+        self.noise_rms = max(1e-5, speech_threshold / max(start_multiplier, 1.0))
+        self.start_threshold = speech_threshold
+        self.continue_threshold = max(speech_threshold * 0.6, self.noise_rms)
         self.reset()
 
     def set_sample_rate(self, sample_rate: int) -> None:
@@ -124,6 +208,7 @@ class AudioTurnDetector:
         self._captured_ms = 0.0
         self._preroll: Deque[np.ndarray] = deque()
         self._preroll_ms = 0.0
+        self._calibrated_ms = 0.0
 
     def accept(self, chunk: np.ndarray) -> list[AudioEvent]:
         mono = ensure_mono_float32(chunk)
@@ -132,13 +217,24 @@ class AudioTurnDetector:
 
         duration_ms = mono.size / self.sample_rate * 1000.0
         rms = float(math.sqrt(float(np.mean(mono * mono)) + 1e-12))
-        is_voice = rms >= self.speech_threshold
+        self._update_thresholds(rms, duration_ms)
+        threshold = self.continue_threshold if self.in_speech else self.start_threshold
+        is_voice = rms >= threshold
         events: list[AudioEvent] = []
 
         now = time.monotonic()
         if now - self._last_meter_at >= 0.1:
             self._last_meter_at = now
-            events.append(AudioEvent(type="meter", rms=rms))
+            events.append(
+                AudioEvent(
+                    type="meter",
+                    rms=rms,
+                    noise_rms=self.noise_rms,
+                    start_threshold=self.start_threshold,
+                    continue_threshold=self.continue_threshold,
+                    in_speech=self.in_speech,
+                )
+            )
 
         if is_voice:
             self._speech_ms += duration_ms
@@ -160,9 +256,47 @@ class AudioTurnDetector:
             self._captured = [part.copy() for part in self._preroll]
             self._captured_ms = self._preroll_ms
             self._silence_ms = 0.0
-            events.append(AudioEvent(type="speech_start", rms=rms))
+            events.append(
+                AudioEvent(
+                    type="speech_start",
+                    rms=rms,
+                    noise_rms=self.noise_rms,
+                    start_threshold=self.start_threshold,
+                    continue_threshold=self.continue_threshold,
+                    in_speech=True,
+                )
+            )
 
         return events
+
+    def _update_thresholds(self, rms: float, duration_ms: float) -> None:
+        if not self.adaptive:
+            self.noise_rms = max(1e-5, self.speech_threshold / max(self.start_multiplier, 1.0))
+            self.start_threshold = self.speech_threshold
+            self.continue_threshold = max(self.speech_threshold * 0.6, self.noise_rms)
+            return
+
+        previous_start = self.start_threshold
+        can_update_noise = not self.in_speech and rms < max(previous_start, self.speech_threshold * 1.4)
+        if can_update_noise:
+            if self._calibrated_ms < self.noise_calibration_ms:
+                total_ms = self._calibrated_ms + duration_ms
+                old_weight = self._calibrated_ms / max(total_ms, 1e-6)
+                new_weight = duration_ms / max(total_ms, 1e-6)
+                self.noise_rms = self.noise_rms * old_weight + rms * new_weight
+                self._calibrated_ms = total_ms
+            else:
+                self.noise_rms = self.noise_rms * 0.98 + rms * 0.02
+
+        floor = max(1e-5, self.noise_rms)
+        self.start_threshold = max(
+            self.speech_threshold,
+            floor * max(1.0, self.start_multiplier),
+        )
+        self.continue_threshold = max(
+            self.speech_threshold * 0.55,
+            floor * max(1.0, self.continue_multiplier),
+        )
 
     def _push_preroll(self, mono: np.ndarray, duration_ms: float) -> None:
         self._preroll.append(mono.copy())

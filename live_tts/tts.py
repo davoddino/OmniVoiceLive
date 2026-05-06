@@ -3,15 +3,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import random
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from live_tts.audio import apply_edge_fade, trim_low_amplitude_edges
 from live_tts.config import LiveTTSConfig
+from live_tts.voice import VoiceSessionConfig
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,7 @@ class BaseTTS(ABC):
         first: bool,
         state: TTSTurnState | None = None,
         language: str | None = None,
+        voice_config: VoiceSessionConfig | None = None,
     ) -> np.ndarray:
         raise NotImplementedError
 
@@ -54,11 +58,12 @@ class MockTTS(BaseTTS):
         first: bool,
         state: TTSTurnState | None = None,
         language: str | None = None,
+        voice_config: VoiceSessionConfig | None = None,
     ) -> np.ndarray:
         duration = min(3.2, max(0.45, len(text) / 38.0))
         samples = int(self.sample_rate * duration)
         t = np.arange(samples, dtype=np.float32) / self.sample_rate
-        base = 185.0 if first else 165.0
+        base = 175.0
         wave = 0.12 * np.sin(2.0 * math.pi * base * t)
         wave += 0.045 * np.sin(2.0 * math.pi * base * 2.01 * t)
         envelope = np.ones_like(wave)
@@ -79,6 +84,9 @@ class OmniVoiceTTS(BaseTTS):
         self._startup_voice_prompt: Any | None = None
         self._startup_anchor_text = ""
         self._startup_anchor_duration_s = 0.0
+        self._fixed_reference_voice_prompt: Any | None = None
+        self._fixed_reference_text = ""
+        self._fixed_reference_duration_s = 0.0
 
     async def start(self) -> None:
         voice_mode = self._voice_mode()
@@ -90,12 +98,38 @@ class OmniVoiceTTS(BaseTTS):
             self.config.tts_instruct,
         )
         await asyncio.to_thread(self._load_model)
-        if voice_mode == "session_anchor" and self.config.tts_startup_voice_anchor:
+        if voice_mode == "fixed_reference":
+            await asyncio.to_thread(self._load_fixed_reference_voice_prompt)
+            if self.config.tts_warmup_enabled:
+                logger.info(
+                    "omnivoice fixed reference warmup text=%r",
+                    self.config.tts_warmup_text,
+                )
+                voice_config = VoiceSessionConfig.from_config(
+                    self.config,
+                    self.sample_rate,
+                )
+                await self.synthesize(
+                    self.config.tts_warmup_text,
+                    first=True,
+                    state=self.create_turn_state(),
+                    voice_config=voice_config,
+                )
+        elif voice_mode == "session_anchor" and self.config.tts_startup_voice_anchor:
             anchor_text = self.config.tts_startup_anchor_text.strip()
             if anchor_text:
                 logger.info("omnivoice startup voice anchor text=%r", anchor_text)
                 anchor_state = TTSTurnState()
-                await self.synthesize(anchor_text, first=True, state=anchor_state)
+                voice_config = VoiceSessionConfig.from_config(
+                    self.config,
+                    self.sample_rate,
+                )
+                await self.synthesize(
+                    anchor_text,
+                    first=True,
+                    state=anchor_state,
+                    voice_config=voice_config,
+                )
                 if anchor_state.voice_prompt is not None:
                     self._startup_voice_prompt = anchor_state.voice_prompt
                     self._startup_anchor_text = anchor_state.anchor_text
@@ -107,10 +141,25 @@ class OmniVoiceTTS(BaseTTS):
                     )
         elif self.config.tts_warmup_enabled:
             logger.info("omnivoice warmup text=%r", self.config.tts_warmup_text)
-            await self.synthesize(self.config.tts_warmup_text, first=True)
+            voice_config = VoiceSessionConfig.from_config(self.config, self.sample_rate)
+            await self.synthesize(
+                self.config.tts_warmup_text,
+                first=True,
+                voice_config=voice_config,
+            )
         logger.info("omnivoice ready sample_rate=%s", self.sample_rate)
 
     def create_turn_state(self) -> TTSTurnState:
+        if (
+            self._voice_mode() == "fixed_reference"
+            and self._fixed_reference_voice_prompt is not None
+        ):
+            return TTSTurnState(
+                voice_prompt=self._fixed_reference_voice_prompt,
+                anchor_text=self._fixed_reference_text,
+                anchor_duration_s=self._fixed_reference_duration_s,
+                anchor_source="fixed_reference",
+            )
         if (
             self._voice_mode() == "session_anchor"
             and self._startup_voice_prompt is not None
@@ -129,6 +178,7 @@ class OmniVoiceTTS(BaseTTS):
         first: bool,
         state: TTSTurnState | None = None,
         language: str | None = None,
+        voice_config: VoiceSessionConfig | None = None,
     ) -> np.ndarray:
         return await asyncio.to_thread(
             self._synthesize_sync,
@@ -136,6 +186,7 @@ class OmniVoiceTTS(BaseTTS):
             first,
             state,
             language,
+            voice_config,
         )
 
     def _load_model(self) -> None:
@@ -153,6 +204,46 @@ class OmniVoiceTTS(BaseTTS):
         self.sample_rate = int(self.model.sampling_rate or 24000)
         logger.info("omnivoice model loaded sample_rate=%s", self.sample_rate)
 
+    def _load_fixed_reference_voice_prompt(self) -> None:
+        if self.model is None:
+            self._load_model()
+        assert self.model is not None
+        if self._fixed_reference_voice_prompt is not None:
+            return
+
+        ref_audio_path = _resolve_path(self.config.tts_reference_audio)
+        ref_text = self.config.tts_reference_text.strip()
+        if not ref_audio_path.is_file():
+            raise RuntimeError(
+                "LIVE_TTS_VOICE_MODE=fixed_reference requires "
+                f"LIVE_TTS_REFERENCE_AUDIO={ref_audio_path}. "
+                "Generate candidates first with: "
+                "uv run python scripts/generate_voice_candidates.py"
+            )
+        if not ref_text:
+            raise RuntimeError(
+                "LIVE_TTS_REFERENCE_TEXT is required for fixed_reference mode."
+            )
+
+        logger.info(
+            "omnivoice fixed reference loading audio=%s chars=%s",
+            ref_audio_path,
+            len(ref_text),
+        )
+        self._fixed_reference_voice_prompt = self.model.create_voice_clone_prompt(
+            ref_audio=str(ref_audio_path),
+            ref_text=ref_text,
+            preprocess_prompt=True,
+        )
+        self._clear_cuda_cache()
+        self._fixed_reference_text = ref_text
+        self._fixed_reference_duration_s = _audio_duration_seconds(ref_audio_path)
+        logger.info(
+            "omnivoice fixed reference ready duration_s=%.2f chars=%s",
+            self._fixed_reference_duration_s,
+            len(ref_text),
+        )
+
     def _resolve_dtype(self, torch_module):
         value = self.config.tts_dtype.strip().lower()
         if value in {"float16", "fp16", "half"}:
@@ -169,34 +260,42 @@ class OmniVoiceTTS(BaseTTS):
         first: bool,
         state: TTSTurnState | None,
         language: str | None,
+        voice_config: VoiceSessionConfig | None,
     ) -> np.ndarray:
         if self.model is None:
             self._load_model()
         assert self.model is not None
 
+        voice_config = voice_config or VoiceSessionConfig.from_config(
+            self.config,
+            self.sample_rate,
+            language=language,
+        )
+
         num_step = (
-            self.config.tts_num_step_first if first else self.config.tts_num_step_next
+            voice_config.num_step_first if first else voice_config.num_step_next
         )
         voice_mode = self._voice_mode()
         use_anchor = (
-            voice_mode in {"turn_anchor", "session_anchor"}
+            voice_mode in {"fixed_reference", "turn_anchor", "session_anchor"}
             and state is not None
             and state.voice_prompt is not None
         )
         with self._lock:
+            self._apply_seed(voice_config.seed)
             kwargs = {
                 "text": text,
-                "language": language or self.config.tts_language,
+                "language": language or voice_config.language or self.config.tts_language,
                 "num_step": num_step,
-                "speed": self.config.tts_speed,
-                "guidance_scale": self.config.tts_guidance_scale,
-                "position_temperature": self.config.tts_position_temperature,
-                "class_temperature": self.config.tts_class_temperature,
+                "speed": voice_config.speed,
+                "guidance_scale": voice_config.guidance_scale,
+                "position_temperature": voice_config.position_temperature,
+                "class_temperature": voice_config.class_temperature,
                 "postprocess_output": self.config.tts_postprocess_output,
                 "denoise": self.config.tts_denoise,
             }
-            if self.config.tts_instruct.strip():
-                kwargs["instruct"] = self.config.tts_instruct
+            if voice_config.instruct and voice_mode != "fixed_reference":
+                kwargs["instruct"] = voice_config.instruct
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt
 
@@ -209,6 +308,20 @@ class OmniVoiceTTS(BaseTTS):
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
         waveform = apply_edge_fade(waveform, self.sample_rate)
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
+
+    def _apply_seed(self, seed: int | None) -> None:
+        if seed is None:
+            return
+        random.seed(seed)
+        np.random.seed(seed)
+        try:
+            import torch
+
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+        except Exception:
+            logger.debug("torch seed setup failed", exc_info=True)
 
     def _maybe_create_anchor(
         self,
@@ -259,7 +372,7 @@ class OmniVoiceTTS(BaseTTS):
             )
         except Exception:
             logger.exception("omnivoice anchor creation failed; continuing without it")
-            self._clear_cuda_cache_after_anchor_error()
+            self._clear_cuda_cache()
 
     def _crop_anchor_reference(
         self,
@@ -290,7 +403,7 @@ class OmniVoiceTTS(BaseTTS):
         )
         return ref_text, ref_waveform, ref_duration_s
 
-    def _clear_cuda_cache_after_anchor_error(self) -> None:
+    def _clear_cuda_cache(self) -> None:
         try:
             import torch
 
@@ -303,12 +416,14 @@ class OmniVoiceTTS(BaseTTS):
         mode = self.config.tts_voice_mode.strip().lower().replace("-", "_")
         if mode in {"design", "voice_design", "instruct"}:
             return "voice_design"
+        if mode in {"fixed_reference", "reference", "reference_voice", "voice_reference"}:
+            return "fixed_reference"
         if mode in {"turn_anchor", "self_condition", "turn_self_condition"}:
             return "turn_anchor"
         if mode in {"session_anchor", "anchor", "session_self_condition"}:
             return "session_anchor"
         raise ValueError(
-            "Unsupported LIVE_TTS_VOICE_MODE. Use voice_design, turn_anchor, or session_anchor."
+            "Unsupported LIVE_TTS_VOICE_MODE. Use voice_design, fixed_reference, turn_anchor, or session_anchor."
         )
 
 
@@ -319,3 +434,22 @@ def create_tts(config: LiveTTSConfig) -> BaseTTS:
     if backend == "omnivoice":
         return OmniVoiceTTS(config)
     raise ValueError(f"Unsupported LIVE_TTS_TTS_BACKEND: {config.tts_backend}")
+
+
+def _resolve_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    return (Path.cwd() / path).resolve()
+
+
+def _audio_duration_seconds(path: Path) -> float:
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(path))
+        if info.samplerate:
+            return float(info.frames) / float(info.samplerate)
+    except Exception:
+        logger.debug("unable to read reference audio duration", exc_info=True)
+    return 0.0

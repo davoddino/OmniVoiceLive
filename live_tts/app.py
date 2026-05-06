@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from live_tts.config import LiveTTSConfig
 from live_tts.llm import LLMStreamer
+from live_tts.rag import RAGRetriever
 from live_tts.session import RealtimeSession
 from live_tts.stt import STTService
 from live_tts.tts import BaseTTS, create_tts
@@ -22,6 +23,7 @@ config = LiveTTSConfig.from_env()
 stt_service = STTService(config)
 llm_streamer = LLMStreamer(config)
 tts_service: BaseTTS = create_tts(config)
+rag_retriever = RAGRetriever(config)
 
 app = FastAPI(title="OmniVoice Live TTS", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -31,12 +33,13 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def startup() -> None:
     ensure_websocket_support()
     logger.info(
-        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s instruct=%r num_step=%s/%s speed=%.2f segments=%s-%s/%s-%s vad_threshold=%.4f client_barge_threshold=%.4f",
+        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s reference_audio=%r instruct=%r num_step=%s/%s speed=%.2f segments=%s-%s/%s-%s vad_threshold=%.4f vad_adaptive=%s rag_enabled=%s recording_enabled=%s client_barge_threshold=%.4f",
         config.tts_backend,
         config.stt_backend,
         config.llm_backend,
         bool(config.ssl_certfile and config.ssl_keyfile),
         config.tts_voice_mode,
+        config.tts_reference_audio if config.tts_voice_mode == "fixed_reference" else "",
         config.tts_instruct,
         config.tts_num_step_first,
         config.tts_num_step_next,
@@ -46,6 +49,9 @@ async def startup() -> None:
         config.segment_min_next_chars,
         config.segment_max_next_chars,
         config.vad_speech_threshold,
+        config.vad_adaptive,
+        config.rag_enabled,
+        config.recording_enabled,
         config.client_barge_threshold,
     )
     await tts_service.start()
@@ -66,29 +72,51 @@ async def health() -> dict[str, object]:
         "stt_backend": config.stt_backend,
         "llm_backend": config.llm_backend,
         "tts_voice_mode": config.tts_voice_mode,
+        "tts_voice_id": config.tts_voice_id,
+        "tts_reference_audio": config.tts_reference_audio,
         "tts_instruct": config.tts_instruct,
         "tts_language": config.tts_language,
         "stt_language": config.stt_language,
         "tts_num_step_first": config.tts_num_step_first,
         "tts_num_step_next": config.tts_num_step_next,
         "tts_speed": config.tts_speed,
+        "tts_position_temperature": config.tts_position_temperature,
+        "tts_class_temperature": config.tts_class_temperature,
+        "tts_loudness_target_lufs": config.tts_loudness_target_lufs,
+        "tts_crossfade_ms": config.tts_crossfade_ms,
         "segment_min_first_chars": config.segment_min_first_chars,
         "segment_max_first_chars": config.segment_max_first_chars,
         "segment_min_next_chars": config.segment_min_next_chars,
         "segment_max_next_chars": config.segment_max_next_chars,
         "vad_speech_threshold": config.vad_speech_threshold,
+        "vad_adaptive": config.vad_adaptive,
+        "vad_noise_calibration_ms": config.vad_noise_calibration_ms,
+        "vad_start_multiplier": config.vad_start_multiplier,
+        "vad_continue_multiplier": config.vad_continue_multiplier,
         "vad_start_ms": config.vad_start_ms,
         "vad_end_ms": config.vad_end_ms,
         "websocket_support": has_websocket_support(),
         "client_barge_threshold": config.client_barge_threshold,
         "client_barge_stop_ms": config.client_barge_stop_ms,
         "client_barge_commit_ms": config.client_barge_commit_ms,
+        "rag_enabled": config.rag_enabled,
+        "rag_timeout_ms": config.rag_timeout_ms,
+        "rag_max_chunks": config.rag_max_chunks,
+        "recording_enabled": config.recording_enabled,
+        "recording_dir": config.recording_dir,
     }
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    session = RealtimeSession(websocket, config, stt_service, llm_streamer, tts_service)
+    session = RealtimeSession(
+        websocket,
+        config,
+        stt_service,
+        llm_streamer,
+        tts_service,
+        rag_retriever,
+    )
     await session.run()
 
 

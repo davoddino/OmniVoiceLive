@@ -10,8 +10,9 @@ sostituire STT, LLM o TTS senza riscrivere il frontend.
 
 ## Vincoli Di Prodotto
 
-- Voce: voice design OmniVoice, non voce umana clonata.
-- Profilo vocale iniziale: italiano con `instruct="male, middle-aged, low pitch"`.
+- Voce: riferimento sintetico OmniVoice, non voce umana clonata.
+- Profilo vocale iniziale: candidato `voice_candidates/14.wav`, generato da
+  OmniVoice con `instruct="male, middle-aged, low pitch"`.
 - Prima risposta: deve restare veloce, ma senza spezzare troppo il parlato: la
   stabilita' del timbro vale piu' della primissima sillaba immediata.
 - Conversazione: l'assistente deve fermarsi quando l'utente parla sopra.
@@ -146,11 +147,13 @@ sprecata rimane controllato.
 
 Configurazione prevista:
 
-- primo segmento: 280-900 caratteri circa;
-- segmenti successivi: 900-1800 caratteri circa;
+- primo segmento: 70-160 caratteri circa;
+- segmenti successivi: 90-220 caratteri circa;
 - `num_step` primo segmento: 40;
 - `num_step` successivi: 40 di default;
-- meno segmenti possibili per ridurre i reset vocali tra chunk;
+- confini naturali di frase con protezione per email, numeri, URL e codici;
+- riferimento vocale sintetico fisso per tutti i chunk;
+- loudness normalization e crossfade leggero tra chunk;
 - modello caricato una volta all'avvio;
 - warmup TTS all'avvio;
 - trim edge leggero dei segmenti audio per rimuovere padding/fade artificiali.
@@ -174,15 +177,28 @@ LIVE_TTS_DEVICE_MAP=cuda:0
 LIVE_TTS_DTYPE=float16
 LIVE_TTS_LANGUAGE=it
 LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
-LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_VOICE_MODE=fixed_reference
+LIVE_TTS_VOICE_ID=cavadalabs_it_male_calm_v1
+LIVE_TTS_REFERENCE_AUDIO=voice_candidates/14.wav
+LIVE_TTS_REFERENCE_TEXT=Ciao! Certo, ti aiuto volentieri. Con CavadaLabs possiamo creare un chatbot per il tuo sito, collegarlo ai contenuti aziendali e renderlo semplice da aggiornare. Partiamo dalle tue esigenze e scegliamo insieme la soluzione piu adatta.
 LIVE_TTS_NUM_STEP_FIRST=40
 LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.05
 LIVE_TTS_GUIDANCE_SCALE=2.0
-LIVE_TTS_POSITION_TEMPERATURE=2.0
+LIVE_TTS_STABILITY=0.90
+LIVE_TTS_SIMILARITY_BOOST=0.80
+LIVE_TTS_STYLE=0.15
+LIVE_TTS_TEMPERATURE=0.0
+LIVE_TTS_SEED=14
+LIVE_TTS_POSITION_TEMPERATURE=1.0
 LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_POSTPROCESS_OUTPUT=false
 LIVE_TTS_DENOISE=true
+LIVE_TTS_OUTPUT_FORMAT=pcm16
+LIVE_TTS_LOUDNESS_TARGET_LUFS=-16.0
+LIVE_TTS_LOUDNESS_NORMALIZATION=true
+LIVE_TTS_CROSSFADE=true
+LIVE_TTS_CROSSFADE_MS=20
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=1.6
 LIVE_TTS_ANCHOR_MAX_SECONDS=6.0
@@ -203,19 +219,37 @@ LIVE_TTS_LLM_MODEL=qwen3.6-35b
 LIVE_TTS_SYSTEM_PROMPT_FILE=live_tts/prompts/cavadalabs_voice.md
 LIVE_TTS_LLM_TEMPERATURE=0.3
 
-LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=280
-LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=900
-LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=900
-LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=1800
+LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=70
+LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=160
+LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=90
+LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=220
 
 LIVE_TTS_VAD_THRESHOLD=0.020
-LIVE_TTS_VAD_START_MS=220
-LIVE_TTS_VAD_END_MS=750
+LIVE_TTS_VAD_ADAPTIVE=true
+LIVE_TTS_VAD_NOISE_CALIBRATION_MS=1000
+LIVE_TTS_VAD_START_MULTIPLIER=2.2
+LIVE_TTS_VAD_CONTINUE_MULTIPLIER=1.4
+LIVE_TTS_VAD_MIN_SPEECH_MS=180
+LIVE_TTS_VAD_END_SILENCE_MS=500
+LIVE_TTS_VAD_START_MS=180
+LIVE_TTS_VAD_END_MS=500
 
 LIVE_TTS_CLIENT_BARGE_THRESHOLD=0.022
 LIVE_TTS_CLIENT_BARGE_STOP_MS=80
 LIVE_TTS_CLIENT_BARGE_COMMIT_MS=140
 LIVE_TTS_CLIENT_BARGE_COOLDOWN_MS=900
+
+LIVE_TTS_RAG_ENABLED=false
+LIVE_TTS_RAG_DOCS_DIR=rag_docs
+LIVE_TTS_RAG_TIMEOUT_MS=300
+LIVE_TTS_RAG_MAX_CHUNKS=3
+LIVE_TTS_RAG_MAX_CONTEXT_CHARS=2500
+LIVE_TTS_RAG_FALLBACK_TO_LLM=true
+
+LIVE_TTS_RECORDING_ENABLED=true
+LIVE_TTS_RECORDING_DIR=recordings
+LIVE_TTS_RECORDING_QUEUE_SIZE=256
+LIVE_TTS_RECORDING_PREBUFFER_SECONDS=3.0
 ```
 
 La lingua della conversazione si sceglie dall'interfaccia prima di avviare la
@@ -252,33 +286,46 @@ Per usare un iPhone sulla rete locale, segui [LOCAL_HTTPS.md](LOCAL_HTTPS.md).
 
 ## Stabilita' Del Timbro
 
-La modalita' predefinita dopo il voice lab e' `voice_design`, impostata sul
-candidato 14:
+La modalita' consigliata e' `fixed_reference`: il file `voice_candidates/14.wav`
+viene letto una volta all'avvio e trasformato in un prompt vocale OmniVoice
+riusabile. Non viene riprodotto all'utente e non e' una risposta cachata: ogni
+chunk resta generato live dal testo corrente, ma usa sempre lo stesso riferimento
+di voce.
 
 ```text
-LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_VOICE_MODE=fixed_reference
+LIVE_TTS_REFERENCE_AUDIO=voice_candidates/14.wav
+LIVE_TTS_REFERENCE_TEXT=Ciao! Certo, ti aiuto volentieri. Con CavadaLabs possiamo creare un chatbot per il tuo sito, collegarlo ai contenuti aziendali e renderlo semplice da aggiornare. Partiamo dalle tue esigenze e scegliamo insieme la soluzione piu adatta.
 LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
+LIVE_TTS_STARTUP_VOICE_ANCHOR=false
+LIVE_TTS_SESSION_VOICE_ANCHOR=false
 LIVE_TTS_NUM_STEP_FIRST=40
 LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.05
 LIVE_TTS_GUIDANCE_SCALE=2.0
-LIVE_TTS_POSITION_TEMPERATURE=2.0
+LIVE_TTS_SEED=14
+LIVE_TTS_POSITION_TEMPERATURE=1.0
 LIVE_TTS_CLASS_TEMPERATURE=0.0
+LIVE_TTS_LOUDNESS_NORMALIZATION=true
+LIVE_TTS_CROSSFADE_MS=20
 ```
 
-Non richiede una voce esterna o una persona reale e non crea anchor all'avvio.
-La voce quindi corrisponde ai file generati dal voice lab, con lo stesso set di
-parametri.
+In `fixed_reference` l'`instruct` serve soprattutto come documentazione del profilo
+scelto e per rigenerare candidati simili. Durante la sintesi live il riferimento
+audio e' il condizionamento principale, cosi' evitiamo che il voice-design venga
+riestrato diversamente a ogni chunk.
 
-La modalita' `session_anchor` resta disponibile per esperimenti di stabilita' tra
-chunk, ma puo' peggiorare la naturalezza se la reference sintetica non e' buona.
-Per usarla:
+Se `voice_candidates/14.wav` non esiste ancora sulla macchina di avvio:
+
+```bash
+uv run python scripts/generate_voice_candidates.py
+```
+
+Per tornare alla modalita' senza riferimento fisso:
 
 ```text
-LIVE_TTS_VOICE_MODE=session_anchor
-LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
-LIVE_TTS_SESSION_VOICE_ANCHOR=true
-LIVE_TTS_STARTUP_VOICE_ANCHOR=true
+LIVE_TTS_VOICE_MODE=voice_design
+LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 ```
 
 ## Barge-In Locale
