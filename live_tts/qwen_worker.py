@@ -77,6 +77,7 @@ class QwenWorkerState:
             dtype_name = os.environ.get("LIVE_TTS_QWEN_DTYPE", "bfloat16")
             device_map = os.environ.get("LIVE_TTS_QWEN_DEVICE_MAP", "cuda:0")
             attn_impl = os.environ.get("LIVE_TTS_QWEN_ATTN_IMPLEMENTATION", "")
+            model_path = prepare_qwen_model_path(model_id)
 
             kwargs: dict[str, Any] = {
                 "device_map": device_map,
@@ -86,12 +87,13 @@ class QwenWorkerState:
                 kwargs["attn_implementation"] = attn_impl
 
             logger.info(
-                "qwen worker loading model=%s device_map=%s dtype=%s",
+                "qwen worker loading model=%s path=%s device_map=%s dtype=%s",
                 model_id,
+                model_path,
                 device_map,
                 dtype_name,
             )
-            self.model = Qwen3TTSModel.from_pretrained(model_id, **kwargs)
+            self.model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
             logger.info("qwen worker model loaded")
 
     def synthesize(self, request: SynthesisRequest) -> tuple[np.ndarray, int]:
@@ -161,6 +163,58 @@ def encode_wav(samples: np.ndarray, sample_rate: int) -> bytes:
     out = io.BytesIO()
     sf.write(out, samples.astype(np.float32, copy=False), sample_rate, format="WAV")
     return out.getvalue()
+
+
+def prepare_qwen_model_path(model_id: str) -> Path:
+    local_path = Path(model_id).expanduser()
+    if local_path.is_dir():
+        validate_qwen_model_files(local_path)
+        return local_path
+
+    from huggingface_hub import snapshot_download
+
+    revision = os.environ.get("LIVE_TTS_QWEN_REVISION", "main").strip() or "main"
+    cache_dir = os.environ.get("LIVE_TTS_QWEN_CACHE_DIR", "").strip() or None
+    logger.info(
+        "qwen worker preparing model snapshot model=%s revision=%s",
+        model_id,
+        revision,
+    )
+    snapshot = Path(
+        snapshot_download(
+            repo_id=model_id,
+            revision=revision,
+            cache_dir=cache_dir,
+            allow_patterns=[
+                "*.json",
+                "*.safetensors",
+                "speech_tokenizer/*",
+            ],
+        )
+    )
+    validate_qwen_model_files(snapshot)
+    return snapshot
+
+
+def validate_qwen_model_files(model_path: Path) -> None:
+    required = [
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "speech_tokenizer/config.json",
+        "speech_tokenizer/configuration.json",
+        "speech_tokenizer/model.safetensors",
+        "speech_tokenizer/preprocessor_config.json",
+    ]
+    missing = [name for name in required if not (model_path / name).is_file()]
+    if missing:
+        raise RuntimeError(
+            "Qwen model snapshot is incomplete. Missing files: "
+            + ", ".join(missing)
+            + f". Path: {model_path}"
+        )
 
 
 def first_waveform(wavs: Any) -> np.ndarray:
