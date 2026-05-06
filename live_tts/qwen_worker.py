@@ -187,6 +187,7 @@ def prepare_qwen_model_path(model_id: str) -> Path:
             cache_dir=cache_dir,
             allow_patterns=[
                 "*.json",
+                "*.txt",
                 "*.safetensors",
                 "speech_tokenizer/*",
             ],
@@ -203,6 +204,7 @@ def validate_qwen_model_files(model_path: Path) -> None:
         "preprocessor_config.json",
         "tokenizer_config.json",
         "vocab.json",
+        "merges.txt",
         "speech_tokenizer/config.json",
         "speech_tokenizer/configuration.json",
         "speech_tokenizer/model.safetensors",
