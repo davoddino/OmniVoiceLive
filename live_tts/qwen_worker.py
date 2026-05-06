@@ -18,6 +18,33 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+def install_transformers_compat_shim() -> bool:
+    try:
+        from transformers.utils import generic
+    except Exception:
+        return False
+
+    if hasattr(generic, "check_model_inputs"):
+        return False
+
+    def check_model_inputs(*decorator_args, **decorator_kwargs):
+        if (
+            decorator_args
+            and callable(decorator_args[0])
+            and len(decorator_args) == 1
+            and not decorator_kwargs
+        ):
+            return decorator_args[0]
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    setattr(generic, "check_model_inputs", check_model_inputs)
+    return True
+
+
 class SynthesisRequest(BaseModel):
     text: str
     language: str = "it"
@@ -39,6 +66,11 @@ class QwenWorkerState:
             if self.model is not None:
                 return
             import torch
+
+            if install_transformers_compat_shim():
+                logger.warning(
+                    "qwen worker installed transformers check_model_inputs shim"
+                )
             from qwen_tts import Qwen3TTSModel
 
             model_id = os.environ["LIVE_TTS_QWEN_MODEL"]

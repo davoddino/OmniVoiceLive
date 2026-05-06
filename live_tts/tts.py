@@ -503,7 +503,7 @@ class Qwen3TTS(BaseTTS):
         if self.config.qwen_tts_worker_install:
             self._ensure_worker_environment(worker_python)
 
-        env = os.environ.copy()
+        env = self._worker_env()
         env.update(
             {
                 "LIVE_TTS_QWEN_MODEL": self.config.qwen_tts_model,
@@ -517,7 +517,6 @@ class Qwen3TTS(BaseTTS):
                 ),
                 "LIVE_TTS_QWEN_WORKER_HOST": self.config.qwen_tts_worker_host,
                 "LIVE_TTS_QWEN_WORKER_PORT": str(self.config.qwen_tts_worker_port),
-                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
         )
         command = [
@@ -547,15 +546,18 @@ class Qwen3TTS(BaseTTS):
         marker = worker_python.parents[1] / ".live_tts_qwen_installed"
         if marker.exists():
             return
+        import_check = [
+            str(worker_python),
+            "-c",
+            (
+                "from live_tts.qwen_worker import install_transformers_compat_shim; "
+                "install_transformers_compat_shim(); "
+                "from qwen_tts import Qwen3TTSModel; "
+                "print('ok')"
+            ),
+        ]
         try:
-            subprocess.run(
-                [
-                    str(worker_python),
-                    "-c",
-                    "from qwen_tts import Qwen3TTSModel; print('ok')",
-                ],
-                check=True,
-            )
+            subprocess.run(import_check, check=True, env=self._worker_env())
             marker.write_text("installed\n", encoding="utf-8")
             return
         except subprocess.CalledProcessError:
@@ -566,7 +568,17 @@ class Qwen3TTS(BaseTTS):
             [str(worker_python), "-m", "pip", "install", "-r", str(requirements)],
             check=True,
         )
+        subprocess.run(import_check, check=True, env=self._worker_env())
         marker.write_text("installed\n", encoding="utf-8")
+
+    def _worker_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        repo_root = str(Path(__file__).resolve().parents[1])
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            repo_root if not existing else repo_root + os.pathsep + existing
+        )
+        return env
 
     def _synthesize_sync(self, text: str, language: str | None) -> np.ndarray:
         import requests

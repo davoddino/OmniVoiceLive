@@ -10,9 +10,10 @@
 #
 # Qwen3-TTS currently has a transformers dependency conflict in the published
 # qwen-tts package. Keeping it isolated prevents it from downgrading the main
-# OmniVoice environment.
+# OmniVoice environment. Do not add transformers>=5 here: qwen-tts==0.1.1 pins
+# transformers==4.57.3. The worker installs a small runtime compatibility shim
+# before importing qwen_tts.
 qwen-tts==0.1.1
-transformers>=5.0.0
 accelerate
 einops
 sox
