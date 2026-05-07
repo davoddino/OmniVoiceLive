@@ -5,6 +5,10 @@ import unicodedata
 
 
 PROTECTED_PATTERNS = [
+    re.compile(
+        r"\b(?:dott\.ssa|sig\.ra|sig\.na)\s?|\b(?:dott|sig|ing|avv|prof|dr|mr|mrs|ms)\.\s?",
+        re.IGNORECASE,
+    ),
     re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE),
     re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.IGNORECASE),
     re.compile(r"(?<!\w)\d+(?:[.,:/-]\d+)+(?!\w)"),
@@ -162,21 +166,26 @@ class SentenceAccumulator:
 
             space_cut = self._find_space_cut(buffer, min_chars, max_chars)
             if space_cut is not None:
-                return self._cut(space_cut)
+                return self._cut(space_cut, forced=True)
 
             fallback_cut = self._find_space_cut(buffer, min_chars, lookahead_chars)
-            return self._cut(fallback_cut or max_chars)
+            return self._cut(fallback_cut or max_chars, forced=True)
 
         if force:
-            return self._cut(len(buffer))
+            return self._cut(len(buffer), final=True)
 
         return None
 
-    def _cut(self, index: int) -> str:
+    def _cut(self, index: int, forced: bool = False, final: bool = False) -> str:
         segment = clean_stream_text(self.buffer[:index]).strip()
         self.buffer = self.buffer[index:].strip()
         if self.normalize_segments:
             segment = normalize_tts_text(segment, self.language)
+        if segment and segment[-1] not in ".!?;:,":
+            if forced:
+                segment += ","
+            elif final:
+                segment += "."
         return segment
 
     def _find_delimiter_cut(

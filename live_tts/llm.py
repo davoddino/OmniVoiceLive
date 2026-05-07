@@ -75,7 +75,10 @@ class LLMStreamer:
                 ) as response:
                     response.raise_for_status()
                     response.encoding = "utf-8"
-                    for raw_line in response.iter_lines(decode_unicode=False):
+                    for raw_line in response.iter_lines(
+                        chunk_size=1,
+                        decode_unicode=False,
+                    ):
                         if cancel_event.is_set():
                             break
                         if not raw_line:

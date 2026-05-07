@@ -103,16 +103,53 @@ def trim_low_amplitude_edges(
     return mono[start:end].astype(np.float32, copy=False)
 
 
-def apply_edge_fade(samples: np.ndarray, sample_rate: int, fade_ms: int = 8) -> np.ndarray:
+def apply_edge_fade(
+    samples: np.ndarray,
+    sample_rate: int,
+    fade_ms: int = 8,
+    fade_in_ms: int | None = None,
+    fade_out_ms: int | None = None,
+) -> np.ndarray:
     mono = ensure_mono_float32(samples).copy()
-    n = min(int(sample_rate * fade_ms / 1000), mono.size // 2)
-    if n <= 0:
+    if fade_in_ms is None and fade_out_ms is None:
+        fade_in_ms = fade_ms
+        fade_out_ms = fade_ms
+    fade_in_ms = max(0, int(fade_in_ms or 0))
+    fade_out_ms = max(0, int(fade_out_ms or 0))
+    if mono.size == 0 or (fade_in_ms <= 0 and fade_out_ms <= 0):
         return mono
-    fade_in = np.linspace(0.0, 1.0, n, dtype=np.float32)
-    fade_out = np.linspace(1.0, 0.0, n, dtype=np.float32)
-    mono[:n] *= fade_in
-    mono[-n:] *= fade_out
+    fade_in_samples = min(int(sample_rate * fade_in_ms / 1000), mono.size // 2)
+    if fade_in_samples > 0:
+        fade_in = np.linspace(0.0, 1.0, fade_in_samples, dtype=np.float32)
+        mono[:fade_in_samples] *= fade_in
+    fade_out_samples = min(int(sample_rate * fade_out_ms / 1000), mono.size // 2)
+    if fade_out_samples > 0:
+        fade_out = np.linspace(1.0, 0.0, fade_out_samples, dtype=np.float32)
+        mono[-fade_out_samples:] *= fade_out
     return mono
+
+
+def rms_loudness_gain(
+    samples: np.ndarray,
+    target_lufs: float = -16.0,
+    max_gain_db: float = 9.0,
+    min_gain_db: float = -12.0,
+) -> float:
+    mono = ensure_mono_float32(samples)
+    if mono.size == 0:
+        return 1.0
+    active = mono[np.abs(mono) > 1e-4]
+    if active.size < max(16, mono.size // 100):
+        active = mono
+    rms = float(math.sqrt(float(np.mean(active * active)) + 1e-12))
+    if rms <= 1e-6:
+        return 1.0
+
+    target_rms = 10.0 ** (target_lufs / 20.0)
+    gain = target_rms / rms
+    min_gain = 10.0 ** (min_gain_db / 20.0)
+    max_gain = 10.0 ** (max_gain_db / 20.0)
+    return min(max(gain, min_gain), max_gain)
 
 
 def normalize_loudness_rms(
@@ -127,23 +164,62 @@ def normalize_loudness_rms(
     if not enabled or mono.size == 0:
         return mono
 
-    active = mono[np.abs(mono) > 1e-4]
-    if active.size < max(16, mono.size // 100):
-        active = mono
-    rms = float(math.sqrt(float(np.mean(active * active)) + 1e-12))
-    if rms <= 1e-6:
-        return mono
-
-    target_rms = 10.0 ** (target_lufs / 20.0)
-    gain = target_rms / rms
-    min_gain = 10.0 ** (min_gain_db / 20.0)
-    max_gain = 10.0 ** (max_gain_db / 20.0)
-    gain = min(max(gain, min_gain), max_gain)
+    gain = rms_loudness_gain(
+        mono,
+        target_lufs=target_lufs,
+        max_gain_db=max_gain_db,
+        min_gain_db=min_gain_db,
+    )
     normalized = mono * gain
     peak = float(np.max(np.abs(normalized))) if normalized.size else 0.0
     if peak > peak_limit:
         normalized = normalized * (peak_limit / peak)
     return np.clip(normalized, -1.0, 1.0).astype(np.float32, copy=False)
+
+
+class AudioLoudnessSmoother:
+    def __init__(
+        self,
+        target_lufs: float = -16.0,
+        enabled: bool = True,
+        smoothing: float = 0.72,
+        max_gain_db: float = 9.0,
+        min_gain_db: float = -12.0,
+        peak_limit: float = 0.98,
+    ) -> None:
+        self.target_lufs = target_lufs
+        self.enabled = enabled
+        self.smoothing = min(max(smoothing, 0.0), 0.98)
+        self.max_gain_db = max_gain_db
+        self.min_gain_db = min_gain_db
+        self.peak_limit = peak_limit
+        self._gain: float | None = None
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        mono = ensure_mono_float32(samples)
+        if not self.enabled or mono.size == 0:
+            return mono
+
+        desired_gain = rms_loudness_gain(
+            mono,
+            target_lufs=self.target_lufs,
+            max_gain_db=self.max_gain_db,
+            min_gain_db=self.min_gain_db,
+        )
+        if self._gain is None:
+            gain = desired_gain
+        else:
+            gain = self._gain * self.smoothing + desired_gain * (1.0 - self.smoothing)
+
+        normalized = mono * gain
+        peak = float(np.max(np.abs(normalized))) if normalized.size else 0.0
+        if peak > self.peak_limit:
+            limiter_gain = self.peak_limit / peak
+            normalized = normalized * limiter_gain
+            gain *= limiter_gain
+
+        self._gain = gain
+        return np.clip(normalized, -1.0, 1.0).astype(np.float32, copy=False)
 
 
 class AudioCrossfader:

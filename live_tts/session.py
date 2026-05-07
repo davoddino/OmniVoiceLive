@@ -14,11 +14,11 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from live_tts.audio import (
+    AudioLoudnessSmoother,
     AudioCrossfader,
     AudioTurnDetector,
     float32_to_wav_bytes,
     iter_pcm_frames,
-    normalize_loudness_rms,
     pad_audio_edges,
     pcm16_bytes_from_float32,
 )
@@ -424,7 +424,12 @@ class RealtimeSession:
                 self.recorder.request_escalation("user_requested_human")
 
             history_before_turn = list(self.history)
-            assistant_text = await self._respond(runtime, user_text, history_before_turn)
+            assistant_text = await self._respond(
+                runtime,
+                user_text,
+                history_before_turn,
+                turn_started_at=start,
+            )
             if not runtime.cancel.is_set():
                 self.history.append({"role": "user", "content": user_text})
                 if assistant_text:
@@ -467,15 +472,20 @@ class RealtimeSession:
         runtime: TurnRuntime,
         user_text: str,
         history: list[dict[str, str]],
+        turn_started_at: float,
     ) -> str:
         turn_id = runtime.turn_id
         segment_queue: asyncio.Queue[str | None] = asyncio.Queue()
         full_text: list[str] = []
         rag_result = RAGResult(False, "", [], 0)
         llm_latency_ms = 0
+        first_llm_delta_logged = False
+        first_segment_logged = False
+        first_audio_logged = False
 
         async def produce_text() -> None:
             nonlocal rag_result, llm_latency_ms
+            nonlocal first_llm_delta_logged, first_segment_logged
             segmenter = SentenceAccumulator(
                 min_first_chars=self.config.segment_min_first_chars,
                 max_first_chars=self.config.segment_max_first_chars,
@@ -497,6 +507,15 @@ class RealtimeSession:
                 ):
                     if runtime.cancel.is_set() or self.current is not runtime:
                         break
+                    if not first_llm_delta_logged:
+                        first_llm_delta_logged = True
+                        latency_ms = int((time.monotonic() - turn_started_at) * 1000)
+                        self.recorder.note_latency("first_llm_delta_ms", latency_ms)
+                        self.recorder.event(
+                            "first_llm_delta",
+                            turn_id=turn_id,
+                            latency_ms=latency_ms,
+                        )
                     full_text.append(piece)
                     await self.send_event(
                         "assistant.text_delta",
@@ -511,6 +530,16 @@ class RealtimeSession:
                             len(segment),
                             _preview(segment),
                         )
+                        if not first_segment_logged:
+                            first_segment_logged = True
+                            latency_ms = int((time.monotonic() - turn_started_at) * 1000)
+                            self.recorder.note_latency("first_segment_ms", latency_ms)
+                            self.recorder.event(
+                                "first_segment_ready",
+                                turn_id=turn_id,
+                                latency_ms=latency_ms,
+                                chars=len(segment),
+                            )
                         await segment_queue.put(segment)
                 llm_latency_ms = int((time.monotonic() - llm_started) * 1000)
                 if not runtime.cancel.is_set():
@@ -523,11 +552,22 @@ class RealtimeSession:
                         len(segment),
                         _preview(segment),
                     )
+                    if not first_segment_logged:
+                        first_segment_logged = True
+                        latency_ms = int((time.monotonic() - turn_started_at) * 1000)
+                        self.recorder.note_latency("first_segment_ms", latency_ms)
+                        self.recorder.event(
+                            "first_segment_ready",
+                            turn_id=turn_id,
+                            latency_ms=latency_ms,
+                            chars=len(segment),
+                        )
                     await segment_queue.put(segment)
             finally:
                 await segment_queue.put(None)
 
         async def consume_tts() -> None:
+            nonlocal first_audio_logged
             first = True
             segment_index = 0
             cancelled_pending = 0
@@ -535,6 +575,10 @@ class RealtimeSession:
             crossfader = AudioCrossfader(
                 self.tts.sample_rate,
                 self.voice_config.crossfade_ms,
+            )
+            loudness = AudioLoudnessSmoother(
+                target_lufs=self.voice_config.loudness_target_lufs,
+                enabled=self.voice_config.loudness_enabled,
             )
             try:
                 while True:
@@ -578,11 +622,7 @@ class RealtimeSession:
                         cancelled_pending += 1 + drain_segment_queue(segment_queue)
                         break
 
-                    waveform = normalize_loudness_rms(
-                        waveform,
-                        target_lufs=self.voice_config.loudness_target_lufs,
-                        enabled=self.voice_config.loudness_enabled,
-                    )
+                    waveform = loudness.process(waveform)
                     output_waveform = crossfader.process(waveform)
                     tts_latency_ms = int((time.monotonic() - synth_started) * 1000)
                     duration_ms = int(len(waveform) / self.tts.sample_rate * 1000)
@@ -614,7 +654,16 @@ class RealtimeSession:
                         duration_ms=duration_ms,
                         latency_ms=tts_latency_ms,
                     )
-                    sent = await self._send_waveform(runtime, output_waveform)
+                    ttfa_started_at = None
+                    if segment_index == 0 and not first_audio_logged:
+                        ttfa_started_at = turn_started_at
+                        first_audio_logged = True
+                    sent = await self._send_waveform(
+                        runtime,
+                        output_waveform,
+                        turn_started_at=ttfa_started_at,
+                        turn_id=turn_id,
+                    )
                     if not sent:
                         cancelled_pending += drain_segment_queue(segment_queue)
                         break
@@ -686,7 +735,13 @@ class RealtimeSession:
             raise RuntimeError("RAG retrieval failed and fallback is disabled")
         return result if result.used else RAGResult(False, "", [], result.latency_ms)
 
-    async def _send_waveform(self, runtime: TurnRuntime, waveform: np.ndarray) -> bool:
+    async def _send_waveform(
+        self,
+        runtime: TurnRuntime,
+        waveform: np.ndarray,
+        turn_started_at: float | None = None,
+        turn_id: int | None = None,
+    ) -> bool:
         if waveform.size == 0:
             return True
         self.recorder.record_output(waveform)
@@ -695,6 +750,15 @@ class RealtimeSession:
             if runtime.cancel.is_set() or self.current is not runtime:
                 return False
             self.recorder.note_first_audio()
+            if turn_started_at is not None:
+                latency_ms = int((time.monotonic() - turn_started_at) * 1000)
+                self.recorder.note_latency("turn_ttfa_ms", latency_ms)
+                self.recorder.event(
+                    "first_audio_sent",
+                    turn_id=turn_id or runtime.turn_id,
+                    latency_ms=latency_ms,
+                )
+                turn_started_at = None
             await self.send_bytes(frame)
             await asyncio.sleep(0)
         return True

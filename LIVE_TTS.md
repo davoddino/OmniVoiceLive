@@ -147,13 +147,13 @@ sprecata rimane controllato.
 
 Configurazione prevista:
 
-- primo segmento: 70-160 caratteri circa;
+- primo segmento: 60-150 caratteri circa;
 - segmenti successivi: 90-220 caratteri circa;
 - `num_step` primo segmento: 40;
 - `num_step` successivi: 40 di default;
 - confini naturali di frase con protezione per email, numeri, URL e codici;
 - riferimento vocale sintetico fisso per tutti i chunk;
-- loudness normalization e crossfade leggero tra chunk;
+- loudness smoothing e crossfade leggero tra chunk;
 - modello caricato una volta all'avvio;
 - warmup TTS all'avvio;
 - trim edge leggero dei segmenti audio per rimuovere padding/fade artificiali.
@@ -191,7 +191,7 @@ LIVE_TTS_SIMILARITY_BOOST=0.80
 LIVE_TTS_STYLE=0.15
 LIVE_TTS_TEMPERATURE=0.0
 LIVE_TTS_SEED=14
-LIVE_TTS_POSITION_TEMPERATURE=0.35
+LIVE_TTS_POSITION_TEMPERATURE=0.15
 LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_POSTPROCESS_OUTPUT=false
 LIVE_TTS_DENOISE=true
@@ -199,7 +199,7 @@ LIVE_TTS_OUTPUT_FORMAT=pcm16
 LIVE_TTS_LOUDNESS_TARGET_LUFS=-16.0
 LIVE_TTS_LOUDNESS_NORMALIZATION=true
 LIVE_TTS_CROSSFADE=true
-LIVE_TTS_CROSSFADE_MS=20
+LIVE_TTS_CROSSFADE_MS=10
 LIVE_TTS_SELF_CONDITION=true
 LIVE_TTS_ANCHOR_MIN_SECONDS=1.6
 LIVE_TTS_ANCHOR_MAX_SECONDS=6.0
@@ -239,8 +239,8 @@ LIVE_TTS_LLM_MODEL=qwen3.6-35b
 LIVE_TTS_SYSTEM_PROMPT_FILE=live_tts/prompts/cavadalabs_voice.md
 LIVE_TTS_LLM_TEMPERATURE=0.3
 
-LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=70
-LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=160
+LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=60
+LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=150
 LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=90
 LIVE_TTS_SEGMENT_MAX_NEXT_CHARS=220
 
@@ -359,21 +359,20 @@ LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.05
 LIVE_TTS_GUIDANCE_SCALE=2.2
 LIVE_TTS_SEED=14
-LIVE_TTS_POSITION_TEMPERATURE=0.35
+LIVE_TTS_POSITION_TEMPERATURE=0.15
 LIVE_TTS_CLASS_TEMPERATURE=0.0
 LIVE_TTS_LOUDNESS_NORMALIZATION=true
-LIVE_TTS_CROSSFADE_MS=20
+LIVE_TTS_CROSSFADE_MS=10
 ```
 
-In `fixed_reference` l'`instruct` serve soprattutto come documentazione del profilo
-scelto e per rigenerare candidati simili. Durante la sintesi live il riferimento
-audio e' il condizionamento principale, cosi' evitiamo che il voice-design venga
-riestrato diversamente a ogni chunk.
+In `fixed_reference` il riferimento audio resta il condizionamento principale, ma
+l'`instruct` coerente viene passato comunque al modello per rinforzare attributi
+stabili come genere, eta' e pitch senza riestrarre una voce diversa a ogni chunk.
 
 `LIVE_TTS_REFERENCE_PREPROCESS=false` mantiene il file 14 esattamente come e'
-stato generato. `LIVE_TTS_POSITION_TEMPERATURE=0.35` riduce la varianza tra
-chunk; se vuoi una voce piu' vivace puoi salire verso `0.6`, se vuoi massima
-coerenza puoi scendere verso `0.15`.
+stato generato. `LIVE_TTS_POSITION_TEMPERATURE=0.15` riduce la varianza tra
+chunk senza bloccare completamente l'espressivita'; se serve massima coerenza
+puoi scendere a `0.0`.
 
 Se `voice_candidates/14.wav` non esiste ancora sulla macchina di avvio:
 

@@ -279,7 +279,7 @@ class LiveTTSConfig:
             tts_temperature=_env_float("LIVE_TTS_TEMPERATURE", 0.0),
             tts_seed=_env_optional_int("LIVE_TTS_SEED"),
             tts_position_temperature=_env_float(
-                "LIVE_TTS_POSITION_TEMPERATURE", 0.35
+                "LIVE_TTS_POSITION_TEMPERATURE", 0.15
             ),
             tts_class_temperature=_env_float("LIVE_TTS_CLASS_TEMPERATURE", 0.0),
             tts_postprocess_output=_env_bool("LIVE_TTS_POSTPROCESS_OUTPUT", False),
@@ -290,7 +290,7 @@ class LiveTTSConfig:
                 "LIVE_TTS_LOUDNESS_TARGET_LUFS", -16.0
             ),
             tts_loudness_enabled=_env_bool("LIVE_TTS_LOUDNESS_NORMALIZATION", True),
-            tts_crossfade_ms=_env_int("LIVE_TTS_CROSSFADE_MS", 20),
+            tts_crossfade_ms=_env_int("LIVE_TTS_CROSSFADE_MS", 10),
             tts_crossfade_enabled=_env_bool("LIVE_TTS_CROSSFADE", True),
             tts_warmup_enabled=_env_bool("LIVE_TTS_WARMUP", True),
             tts_warmup_text=_env("LIVE_TTS_WARMUP_TEXT", "Ciao, sono qui."),
@@ -379,10 +379,10 @@ class LiveTTSConfig:
             llm_top_p=_env_float("LIVE_TTS_LLM_TOP_P", 1.0),
             llm_timeout_s=_env_float("LIVE_TTS_LLM_TIMEOUT_S", 120.0),
             system_prompt=_configured_system_prompt(),
-            segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 90),
-            segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 280),
-            segment_min_next_chars=_env_int("LIVE_TTS_SEGMENT_MIN_NEXT_CHARS", 120),
-            segment_max_next_chars=_env_int("LIVE_TTS_SEGMENT_MAX_NEXT_CHARS", 380),
+            segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 60),
+            segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 150),
+            segment_min_next_chars=_env_int("LIVE_TTS_SEGMENT_MIN_NEXT_CHARS", 90),
+            segment_max_next_chars=_env_int("LIVE_TTS_SEGMENT_MAX_NEXT_CHARS", 220),
             vad_speech_threshold=_env_float("LIVE_TTS_VAD_THRESHOLD", 0.020),
             vad_adaptive=_env_bool_any(
                 ("LIVE_TTS_VAD_ADAPTIVE", "VAD_ADAPTIVE"), True

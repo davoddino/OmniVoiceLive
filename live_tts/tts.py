@@ -294,7 +294,7 @@ class OmniVoiceTTS(BaseTTS):
                 "postprocess_output": self.config.tts_postprocess_output,
                 "denoise": self.config.tts_denoise,
             }
-            if voice_config.instruct and voice_mode != "fixed_reference":
+            if voice_config.instruct:
                 kwargs["instruct"] = voice_config.instruct
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt
@@ -306,7 +306,12 @@ class OmniVoiceTTS(BaseTTS):
 
         waveform = raw_waveform
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
-        waveform = apply_edge_fade(waveform, self.sample_rate)
+        waveform = apply_edge_fade(
+            waveform,
+            self.sample_rate,
+            fade_in_ms=4 if first else 0,
+            fade_out_ms=0,
+        )
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
 
     def _apply_seed(self, seed: int | None) -> None:
@@ -464,7 +469,7 @@ class Qwen3TTS(BaseTTS):
         language: str | None = None,
         voice_config: VoiceSessionConfig | None = None,
     ) -> np.ndarray:
-        return await asyncio.to_thread(self._synthesize_sync, text, language)
+        return await asyncio.to_thread(self._synthesize_sync, text, language, first)
 
     def _ensure_worker_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -564,7 +569,7 @@ class Qwen3TTS(BaseTTS):
         )
         return env
 
-    def _synthesize_sync(self, text: str, language: str | None) -> np.ndarray:
+    def _synthesize_sync(self, text: str, language: str | None, first: bool) -> np.ndarray:
         import requests
 
         response = requests.post(
@@ -583,7 +588,12 @@ class Qwen3TTS(BaseTTS):
         if sample_rate:
             self.sample_rate = int(sample_rate)
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
-        waveform = apply_edge_fade(waveform, self.sample_rate)
+        waveform = apply_edge_fade(
+            waveform,
+            self.sample_rate,
+            fade_in_ms=4 if first else 0,
+            fade_out_ms=0,
+        )
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)
 
     async def _wait_ready(self) -> None:

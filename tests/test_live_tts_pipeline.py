@@ -10,12 +10,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from live_tts.audio import pad_audio_edges
+from live_tts.audio import AudioLoudnessSmoother, apply_edge_fade, pad_audio_edges
 from live_tts.playback import drain_segment_queue
 from live_tts.rag import RAGRetriever
 from live_tts.recording import AsyncSessionRecorder
 from live_tts.segmenter import SentenceAccumulator, normalize_tts_text
-from live_tts.tts import normalize_tts_engine
+from live_tts.tts import OmniVoiceTTS, TTSTurnState, normalize_tts_engine
 from live_tts.voice import VoiceSessionConfig
 
 
@@ -59,6 +59,22 @@ class LiveTTSPipelineTests(unittest.TestCase):
         self.assertIn("3 9", normalized)
         self.assertIn("telefono", normalized)
 
+    def test_forced_segment_cut_adds_continuation_comma(self) -> None:
+        segmenter = SentenceAccumulator(
+            min_first_chars=10,
+            max_first_chars=28,
+            min_next_chars=10,
+            max_next_chars=28,
+            normalize_segments=True,
+        )
+
+        segments = segmenter.push(
+            "Questa frase continua senza una punteggiatura naturale nel mezzo"
+        )
+
+        self.assertGreaterEqual(len(segments), 1)
+        self.assertTrue(segments[0].endswith(","))
+
     def test_voice_session_config_is_stable(self) -> None:
         config = voice_config_source()
         first = VoiceSessionConfig.from_config(config, 24000, language="it")
@@ -95,6 +111,56 @@ class LiveTTSPipelineTests(unittest.TestCase):
     def test_tts_engine_aliases_are_normalized(self) -> None:
         self.assertEqual(normalize_tts_engine("qwen"), "qwen3_tts")
         self.assertEqual(normalize_tts_engine("omni-voice"), "omnivoice")
+
+    def test_initial_edge_fade_does_not_fade_chunk_tail(self) -> None:
+        samples = np.ones(1000, dtype=np.float32)
+
+        faded = apply_edge_fade(samples, sample_rate=1000, fade_in_ms=10, fade_out_ms=0)
+
+        self.assertLess(faded[0], 0.01)
+        self.assertAlmostEqual(float(faded[-1]), 1.0, places=5)
+
+    def test_loudness_smoother_keeps_gain_state_between_chunks(self) -> None:
+        smoother = AudioLoudnessSmoother(target_lufs=-20.0, smoothing=0.5)
+        quiet = np.full(1000, 0.01, dtype=np.float32)
+        loud = np.full(1000, 0.2, dtype=np.float32)
+
+        first = smoother.process(quiet)
+        second = smoother.process(loud)
+
+        self.assertGreater(float(np.sqrt(np.mean(first * first))), 0.01)
+        self.assertGreater(float(np.sqrt(np.mean(second * second))), 0.1)
+
+    def test_fixed_reference_passes_matching_instruct(self) -> None:
+        class FakeModel:
+            def __init__(self) -> None:
+                self.kwargs = {}
+
+            def generate(self, **kwargs):
+                self.kwargs = kwargs
+                return [np.full(480, 0.1, dtype=np.float32)]
+
+        config = voice_config_source()
+        config.tts_voice_mode = "fixed_reference"
+        config.tts_seed = None
+        fake_model = FakeModel()
+        tts = OmniVoiceTTS(config)
+        tts.model = fake_model
+        tts.sample_rate = 24000
+        prompt = object()
+        state = TTSTurnState(voice_prompt=prompt)
+        voice_config = VoiceSessionConfig.from_config(config, 24000, language="it")
+
+        tts._synthesize_sync(
+            "Ciao, ti aiuto subito.",
+            True,
+            state,
+            "it",
+            voice_config,
+        )
+
+        self.assertEqual(fake_model.kwargs["instruct"], config.tts_instruct)
+        self.assertIs(fake_model.kwargs["voice_clone_prompt"], prompt)
 
 
 class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
@@ -183,6 +249,8 @@ def voice_config_source() -> SimpleNamespace:
         tts_voice_mode="session_anchor",
         tts_instruct="male, middle-aged, low pitch",
         tts_language="it",
+        tts_postprocess_output=False,
+        tts_denoise=True,
     )
 
 
