@@ -11,7 +11,11 @@ from types import SimpleNamespace
 import numpy as np
 
 from live_tts.audio import AudioLoudnessSmoother, apply_edge_fade, pad_audio_edges
-from live_tts.languages import SUPPORTED_LANGUAGES, normalize_language_code
+from live_tts.languages import (
+    SUPPORTED_LANGUAGES,
+    normalize_language_code,
+    omnivoice_tts_language,
+)
 from live_tts.llm import language_instruction, llm_messages, translation_instruction
 from live_tts.playback import drain_segment_queue
 from live_tts.rag import RAGRetriever
@@ -194,6 +198,33 @@ class LiveTTSPipelineTests(unittest.TestCase):
 
         self.assertNotIn("instruct", fake_model.kwargs)
 
+    def test_omnivoice_tts_uses_model_compatible_language_names(self) -> None:
+        class FakeModel:
+            def __init__(self) -> None:
+                self.kwargs = {}
+
+            def generate(self, **kwargs):
+                self.kwargs = kwargs
+                return [np.full(480, 0.1, dtype=np.float32)]
+
+        config = voice_config_source()
+        config.tts_voice_mode = "fixed_reference"
+        config.tts_seed = None
+        fake_model = FakeModel()
+        tts = OmniVoiceTTS(config)
+        tts.model = fake_model
+        tts.sample_rate = 24000
+
+        tts._synthesize_sync(
+            "مرحبا",
+            True,
+            TTSTurnState(voice_prompt=object()),
+            "ar",
+            VoiceSessionConfig.from_config(config, 24000, language="ar"),
+        )
+
+        self.assertEqual(fake_model.kwargs["language"], "Standard Arabic")
+
     def test_translation_language_catalog_covers_live_translator_targets(self) -> None:
         required = {
             "it",
@@ -216,11 +247,13 @@ class LiveTTSPipelineTests(unittest.TestCase):
         }
 
         self.assertTrue(required.issubset(SUPPORTED_LANGUAGES))
+        self.assertEqual(SUPPORTED_LANGUAGES["ar"], "Arabo (العربية)")
         self.assertEqual(normalize_language_code("zh-CN"), "zh")
         self.assertEqual(
             normalize_language_code("auto", allow_auto=True),
             "auto",
         )
+        self.assertEqual(omnivoice_tts_language("ar"), "Standard Arabic")
 
     def test_translator_prompt_is_strict_and_target_only(self) -> None:
         prompt = translation_instruction(

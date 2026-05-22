@@ -25,23 +25,23 @@ const ttsEngineSelect = document.getElementById("ttsEngineSelect");
 const LANGUAGE_LABELS = {
   it: "Italiano",
   en: "English",
-  de: "Deutsch",
-  fr: "Français",
-  es: "Español",
-  pt: "Português",
-  ro: "Română",
-  sq: "Shqip",
-  ru: "Русский",
-  uk: "Українська",
+  de: "Tedesco (Deutsch)",
+  fr: "Francese (Français)",
+  es: "Spagnolo (Español)",
+  pt: "Portoghese (Português)",
+  ro: "Rumeno (Română)",
+  sq: "Albanese (Shqip)",
+  ru: "Russo (Русский)",
+  uk: "Ucraino (Українська)",
   pl: "Polski",
   sr: "Serbo/Croato/Bosniaco",
-  hr: "Hrvatski",
-  bs: "Bosanski",
-  ar: "العربية",
-  zh: "简体中文",
-  hi: "हिन्दी",
-  ur: "اردو",
-  sw: "Kiswahili",
+  hr: "Croato (Hrvatski)",
+  bs: "Bosniaco (Bosanski)",
+  ar: "Arabo (العربية)",
+  zh: "Cinese semplificato (简体中文)",
+  hi: "Hindi (हिन्दी)",
+  ur: "Urdu (اردو)",
+  sw: "Swahili (Kiswahili)",
 };
 
 const SOURCE_LANGUAGE_LABELS = {
@@ -106,6 +106,8 @@ const clientVad = {
 startButton.addEventListener("click", startCall);
 stopButton.addEventListener("click", stopCall);
 sessionModeSelect.addEventListener("change", updateModeControls);
+sourceLanguageSelect.addEventListener("change", switchToTranslatorFromLanguageControl);
+languageSelect.addEventListener("change", updateModeControls);
 translationTimingSelect.addEventListener("change", updateModeControls);
 ttsEngineSelect.addEventListener("change", onTtsEngineChange);
 updateModeControls();
@@ -341,19 +343,25 @@ function connectWebSocket() {
 
   socketWasOpen = false;
   socket = new WebSocket(wsUrl);
-  socket.binaryType = "arraybuffer";
+  const ws = socket;
+  let wsOpened = false;
+  ws.binaryType = "arraybuffer";
 
   socketOpenTimer = setTimeout(() => {
-    if (socket && socket.readyState !== WebSocket.OPEN) {
+    if (socket === ws && ws.readyState !== WebSocket.OPEN) {
       addSystemMessage(
-        `INFO: WebSocket ancora non aperto dopo 5s, readyState=${socket.readyState}.`,
+        `INFO: WebSocket ancora non aperto dopo 5s, readyState=${ws.readyState}.`,
       );
       setState("error", "Errore");
-      socket.close();
+      ws.close();
     }
   }, 5000);
 
-  socket.onopen = () => {
+  ws.onopen = () => {
+    if (socket !== ws) {
+      return;
+    }
+    wsOpened = true;
     socketWasOpen = true;
     if (socketOpenTimer) {
       clearTimeout(socketOpenTimer);
@@ -363,7 +371,7 @@ function connectWebSocket() {
     connectionLabel.textContent = "Online";
     pendingSessionStart = true;
     audioStreamingPaused = true;
-    socket.send(
+    ws.send(
       JSON.stringify({
         type: "tts.engine.select",
         engine: selectedEngine(),
@@ -372,8 +380,11 @@ function connectWebSocket() {
     startTimer();
   };
 
-  socket.onmessage = onSocketMessage;
-  socket.onclose = (event) => {
+  ws.onmessage = onSocketMessage;
+  ws.onclose = (event) => {
+    if (socket !== ws) {
+      return;
+    }
     if (socketOpenTimer) {
       clearTimeout(socketOpenTimer);
       socketOpenTimer = null;
@@ -382,7 +393,7 @@ function connectWebSocket() {
       return;
     }
     const reason = event.reason ? ` reason=${event.reason}` : "";
-    if (socketWasOpen) {
+    if (wsOpened || socketWasOpen || event.code === 1000) {
       addSystemMessage(`INFO: WebSocket chiuso code=${event.code}${reason}.`);
       connectionLabel.textContent = "Offline";
       cleanup("Chiamata terminata");
@@ -393,7 +404,10 @@ function connectWebSocket() {
     }
   };
 
-  socket.onerror = () => {
+  ws.onerror = () => {
+    if (socket !== ws) {
+      return;
+    }
     addSystemMessage("INFO: Errore WebSocket. Controlla certificato, IP e firewall.");
     connectionLabel.textContent = "Errore";
     setState("error", "Errore");
@@ -465,6 +479,16 @@ function sendSessionStart() {
   pendingSessionStart = false;
   activeSessionMode = selectedMode();
   activeTranslationTiming = selectedTranslationTiming();
+  const modeLabel =
+    activeSessionMode === "translator" ? "traduttore live" : "agente CavadaLabs";
+  const targetLabel = LANGUAGE_LABELS[selectedLanguage()] || selectedLanguage();
+  const sourceLabel =
+    SOURCE_LANGUAGE_LABELS[selectedSourceLanguage()] || selectedSourceLanguage();
+  addSystemMessage(
+    activeSessionMode === "translator"
+      ? `INFO: Avvio modalità ${modeLabel}: ${sourceLabel} -> ${targetLabel}, timing=${activeTranslationTiming}.`
+      : `INFO: Avvio modalità ${modeLabel}, lingua=${targetLabel}.`,
+  );
   socket.send(
     JSON.stringify({
       type: "session.start",
@@ -913,12 +937,21 @@ function updateModeControls() {
   const translator = selectedMode() === "translator";
   sourceLanguageControl.classList.toggle("hidden", !translator);
   translationTimingControl.classList.toggle("hidden", !translator);
-  languageSelectLabel.textContent = translator ? "A" : "Lingua";
+  languageSelectLabel.textContent = translator ? "A" : "Lingua agente";
   if (translator && selectedTranslationTiming() === "immediate") {
     audioModeLabel.textContent = `Traduttore: buffer ${translatorImmediateBufferMs} ms`;
   } else if (!sessionStarted) {
     audioModeLabel.textContent = "Audio in attesa";
   }
+}
+
+function switchToTranslatorFromLanguageControl() {
+  if (sessionStarted || pendingSessionStart || selectedMode() === "translator") {
+    updateModeControls();
+    return;
+  }
+  sessionModeSelect.value = "translator";
+  updateModeControls();
 }
 
 function configureTtsEngines(engines, activeStatus) {

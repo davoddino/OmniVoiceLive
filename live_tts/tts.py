@@ -19,6 +19,7 @@ import numpy as np
 
 from live_tts.audio import apply_edge_fade, trim_low_amplitude_edges
 from live_tts.config import LiveTTSConfig
+from live_tts.languages import omnivoice_tts_language
 from live_tts.voice import VoiceSessionConfig
 
 
@@ -283,9 +284,12 @@ class OmniVoiceTTS(BaseTTS):
         )
         with self._lock:
             self._apply_seed(voice_config.seed)
+            model_language = omnivoice_tts_language(
+                language or voice_config.language or self.config.tts_language
+            )
             kwargs = {
                 "text": text,
-                "language": language or voice_config.language or self.config.tts_language,
+                "language": model_language,
                 "num_step": num_step,
                 "speed": voice_config.speed,
                 "guidance_scale": voice_config.guidance_scale,

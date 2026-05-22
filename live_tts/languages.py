@@ -4,23 +4,23 @@ from __future__ import annotations
 LANGUAGE_OPTIONS: dict[str, tuple[str, str]] = {
     "it": ("Italiano", "Italian"),
     "en": ("English", "English"),
-    "de": ("Deutsch", "German"),
-    "fr": ("Français", "French"),
-    "es": ("Español", "Spanish"),
-    "pt": ("Português", "Portuguese"),
-    "ro": ("Română", "Romanian"),
-    "sq": ("Shqip", "Albanian"),
-    "ru": ("Русский", "Russian"),
-    "uk": ("Українська", "Ukrainian"),
+    "de": ("Tedesco (Deutsch)", "German"),
+    "fr": ("Francese (Français)", "French"),
+    "es": ("Spagnolo (Español)", "Spanish"),
+    "pt": ("Portoghese (Português)", "Portuguese"),
+    "ro": ("Rumeno (Română)", "Romanian"),
+    "sq": ("Albanese (Shqip)", "Albanian"),
+    "ru": ("Russo (Русский)", "Russian"),
+    "uk": ("Ucraino (Українська)", "Ukrainian"),
     "pl": ("Polski", "Polish"),
     "sr": ("Serbo/Croato/Bosniaco", "Serbian/Croatian/Bosnian"),
-    "hr": ("Hrvatski", "Croatian"),
-    "bs": ("Bosanski", "Bosnian"),
-    "ar": ("العربية", "Arabic"),
-    "zh": ("简体中文", "Simplified Chinese"),
-    "hi": ("हिन्दी", "Hindi"),
-    "ur": ("اردو", "Urdu"),
-    "sw": ("Kiswahili", "Swahili"),
+    "hr": ("Croato (Hrvatski)", "Croatian"),
+    "bs": ("Bosniaco (Bosanski)", "Bosnian"),
+    "ar": ("Arabo (العربية)", "Arabic"),
+    "zh": ("Cinese semplificato (简体中文)", "Simplified Chinese"),
+    "hi": ("Hindi (हिन्दी)", "Hindi"),
+    "ur": ("Urdu (اردو)", "Urdu"),
+    "sw": ("Swahili (Kiswahili)", "Swahili"),
 }
 
 SUPPORTED_LANGUAGES = {
@@ -43,6 +43,12 @@ LANGUAGE_ALIASES = {
     "sr-hr": "sr",
     "serbo-croatian": "sr",
     "serbo/croatian": "sr",
+}
+
+OMNIVOICE_TTS_LANGUAGE_OVERRIDES = {
+    # OmniVoice does not accept bare "ar", but its language map contains
+    # "standard arabic" -> "arb".
+    "ar": "Standard Arabic",
 }
 
 
@@ -77,3 +83,8 @@ def source_language_name(code: str | None) -> str:
     if normalized == "auto":
         return "the auto-detected source language"
     return language_english_name(normalized)
+
+
+def omnivoice_tts_language(code: str | None) -> str:
+    normalized = normalize_language_code(code, default="it")
+    return OMNIVOICE_TTS_LANGUAGE_OVERRIDES.get(normalized, normalized)
