@@ -436,7 +436,9 @@ class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_event_room_updates_listener_language(self) -> None:
         config = event_config()
-        manager = EventRoomManager(config, FakeEventSTT(), FakeEventLLM(), FakeEventTTS())
+        llm = FakeEventLLM()
+        tts = FakeEventTTS()
+        manager = EventRoomManager(config, FakeEventSTT(), llm, tts)
         room = await manager.create_room(
             MemoryEventPeer("speaker"),
             source_language="it",
@@ -450,6 +452,31 @@ class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await room.target_languages(), ["es"])
         self.assertEqual(normalize_event_code(" room-1 "), "ROOM1")
+
+        await room.process_turn(np.full(1600, 0.04, dtype=np.float32), 16000)
+
+        self.assertEqual([call["target_language"] for call in llm.calls], ["es"])
+        self.assertEqual([call["language"] for call in tts.calls], ["es"])
+        self.assertTrue(listener.audio)
+
+    async def test_event_room_blank_requested_code_generates_valid_code(self) -> None:
+        manager = EventRoomManager(
+            event_config(),
+            FakeEventSTT(),
+            FakeEventLLM(),
+            FakeEventTTS(),
+        )
+
+        room = await manager.create_room(
+            MemoryEventPeer("speaker"),
+            source_language="auto",
+            speaker_sample_rate=16000,
+            code="---",
+        )
+
+        self.assertEqual(len(room.code), 6)
+        self.assertTrue(room.code.isalnum())
+        self.assertIs(room, await manager.get_room(room.code))
 
 
 class MemoryEventPeer:

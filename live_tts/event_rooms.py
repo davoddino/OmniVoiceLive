@@ -272,7 +272,9 @@ class EventRoomManager:
         code: str | None = None,
     ) -> "EventRoom":
         async with self._lock:
-            event_code = normalize_event_code(code) if code else self._new_code()
+            event_code = normalize_event_code(code) if code else ""
+            if not event_code:
+                event_code = self._new_code()
             while event_code in self._rooms:
                 event_code = self._new_code()
             room = EventRoom(

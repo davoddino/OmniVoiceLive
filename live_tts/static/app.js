@@ -768,7 +768,6 @@ function onRealtimeSocketMessage(event) {
       break;
     case "tts.engine.error":
       audioStreamingPaused = false;
-      setEngineControlsDisabled(false);
       configureTtsEngines(message.tts_engines, {
         engine: message.engine,
         status: "failed",
@@ -779,12 +778,15 @@ function onRealtimeSocketMessage(event) {
         error: message.message,
       });
       addSystemMessage(message.message || "TTS engine is not available.");
+      if (!sessionStarted) {
+        cleanup("TTS engine error");
+        connectionLabel.textContent = "TTS Error";
+        setState("error", "Error");
+        return;
+      }
+      setEngineControlsDisabled(false);
       connectionLabel.textContent = "TTS Error";
       setState("error", "Error");
-      if (!sessionStarted) {
-        startButton.disabled = false;
-        stopButton.disabled = true;
-      }
       break;
     case "audio.meter":
       updateServerMeter(message.rms);
@@ -910,6 +912,14 @@ function onEventSocketMessage(event) {
     case "tts.engine.error":
       addSystemMessage(message.message || "TTS engine is not available.");
       updateEngineStatus({ engine: message.engine, status: "failed" });
+      if (!sessionStarted) {
+        cleanup("TTS engine error");
+        connectionLabel.textContent = "TTS Error";
+        setState("error", "Error");
+        return;
+      }
+      setEngineControlsDisabled(false);
+      connectionLabel.textContent = "TTS Error";
       setState("error", "Error");
       break;
     case "event.host.started":
@@ -940,6 +950,7 @@ function onEventSocketMessage(event) {
       }
       updateSessionLabel(message);
       setEngineControlsDisabled(true);
+      eventTargetLanguageSelect.disabled = false;
       stopButton.disabled = false;
       connectionLabel.textContent = "Listening";
       setState("listening", "Listening");
@@ -951,6 +962,7 @@ function onEventSocketMessage(event) {
       audioModeLabel.textContent = `Listening in ${
         LANGUAGE_LABELS[message.target_language] || message.target_language
       }`;
+      updateSessionLabel(message);
       break;
     case "event.listener_count":
       listenerCountLabel.textContent = String(message.listener_count || 0);
