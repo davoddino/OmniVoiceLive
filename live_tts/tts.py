@@ -17,7 +17,11 @@ from typing import Any
 
 import numpy as np
 
-from live_tts.audio import apply_edge_fade, trim_low_amplitude_edges
+from live_tts.audio import (
+    apply_edge_fade,
+    trim_low_amplitude_edges,
+    trim_tts_onset_noise,
+)
 from live_tts.config import LiveTTSConfig
 from live_tts.languages import omnivoice_tts_language
 from live_tts.voice import VoiceSessionConfig
@@ -313,6 +317,8 @@ class OmniVoiceTTS(BaseTTS):
 
         waveform = raw_waveform
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
+        if first:
+            waveform = trim_tts_onset_noise(waveform, self.sample_rate)
         waveform = apply_edge_fade(
             waveform,
             self.sample_rate,

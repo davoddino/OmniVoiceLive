@@ -10,7 +10,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from live_tts.audio import AudioLoudnessSmoother, apply_edge_fade, pad_audio_edges
+from live_tts.audio import (
+    AudioLoudnessSmoother,
+    apply_edge_fade,
+    pad_audio_edges,
+    trim_tts_onset_noise,
+)
 from live_tts.languages import (
     SUPPORTED_LANGUAGES,
     normalize_language_code,
@@ -126,6 +131,23 @@ class LiveTTSPipelineTests(unittest.TestCase):
 
         self.assertLess(faded[0], 0.01)
         self.assertAlmostEqual(float(faded[-1]), 1.0, places=5)
+
+    def test_tts_onset_noise_trim_removes_low_level_prefix(self) -> None:
+        sample_rate = 1000
+        prefix = np.full(35, 0.002, dtype=np.float32)
+        speech = np.full(100, 0.08, dtype=np.float32)
+        cleaned = trim_tts_onset_noise(
+            np.concatenate([prefix, speech]),
+            sample_rate,
+            threshold=0.010,
+            window_ms=8,
+            keep_ms=3,
+            max_trim_ms=80,
+        )
+
+        self.assertLessEqual(len(cleaned), 110)
+        first_active = int(np.flatnonzero(np.abs(cleaned) > 0.010)[0])
+        self.assertLessEqual(first_active, 12)
 
     def test_loudness_smoother_keeps_gain_state_between_chunks(self) -> None:
         smoother = AudioLoudnessSmoother(target_lufs=-20.0, smoothing=0.5)

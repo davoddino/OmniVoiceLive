@@ -103,6 +103,38 @@ def trim_low_amplitude_edges(
     return mono[start:end].astype(np.float32, copy=False)
 
 
+def trim_tts_onset_noise(
+    samples: np.ndarray,
+    sample_rate: int,
+    threshold: float = 0.010,
+    window_ms: int = 8,
+    keep_ms: int = 3,
+    max_trim_ms: int = 80,
+) -> np.ndarray:
+    mono = ensure_mono_float32(samples)
+    if mono.size == 0:
+        return mono
+
+    max_trim = min(mono.size, int(sample_rate * max_trim_ms / 1000))
+    window = max(1, int(sample_rate * window_ms / 1000))
+    keep = max(0, int(sample_rate * keep_ms / 1000))
+    if max_trim <= window:
+        return mono
+
+    start = 0
+    for idx in range(0, max_trim - window + 1):
+        frame = mono[idx : idx + window]
+        rms = math.sqrt(float(np.mean(frame * frame)) + 1e-12)
+        peak = float(np.max(np.abs(frame)))
+        if rms >= threshold or peak >= threshold * 2.5:
+            start = max(0, idx - keep)
+            break
+    else:
+        return mono
+
+    return mono[start:].astype(np.float32, copy=False)
+
+
 def apply_edge_fade(
     samples: np.ndarray,
     sample_rate: int,
