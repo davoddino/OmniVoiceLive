@@ -295,8 +295,8 @@ function onMicFrame(event) {
 }
 
 async function setupAudioWorkletGraph(source) {
-  await audioContext.audioWorklet.addModule("/static/recorder-worklet.js");
-  await audioContext.audioWorklet.addModule("/static/player-worklet.js");
+  await audioContext.audioWorklet.addModule("/static/recorder-worklet.js?v=2");
+  await audioContext.audioWorklet.addModule("/static/player-worklet.js?v=2");
 
   playerNode = new AudioWorkletNode(audioContext, "player-worklet");
   playerNode.connect(audioContext.destination);

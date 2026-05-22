@@ -975,12 +975,12 @@ class RealtimeSession:
     def _configure_detector_for_mode(self) -> None:
         if self._is_translator_immediate():
             buffer_ms = max(500, int(self.config.translator_immediate_buffer_ms))
-            turn_ms = max(
-                self.config.vad_min_turn_ms,
-                buffer_ms + self.config.vad_preroll_ms,
-            )
+            turn_ms = max(self.config.vad_min_turn_ms, buffer_ms)
             self.detector.min_turn_ms = turn_ms
-            self.detector.max_turn_s = max(turn_ms / 1000.0, 0.5)
+            self.detector.max_turn_s = max(
+                (turn_ms + self.config.vad_preroll_ms) / 1000.0,
+                0.5,
+            )
         else:
             self.detector.min_turn_ms = int(self._detector_defaults["min_turn_ms"])
             self.detector.max_turn_s = float(self._detector_defaults["max_turn_s"])

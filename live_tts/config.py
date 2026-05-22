@@ -399,7 +399,7 @@ class LiveTTSConfig:
                 os.getenv("LIVE_TTS_LANGUAGE", "it"),
             ),
             translator_immediate_buffer_ms=_env_int(
-                "LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS", 2000
+                "LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS", 1400
             ),
             segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 60),
             segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 150),

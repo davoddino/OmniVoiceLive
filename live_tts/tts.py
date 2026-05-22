@@ -316,7 +316,7 @@ class OmniVoiceTTS(BaseTTS):
         waveform = apply_edge_fade(
             waveform,
             self.sample_rate,
-            fade_in_ms=4 if first else 0,
+            fade_in_ms=12 if first else 0,
             fade_out_ms=0,
         )
         return np.clip(waveform, -1.0, 1.0).astype(np.float32, copy=False)

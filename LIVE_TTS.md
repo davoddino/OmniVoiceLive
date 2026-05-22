@@ -244,7 +244,7 @@ LIVE_TTS_MODE=agent
 LIVE_TTS_TRANSLATOR_TIMING=immediate
 LIVE_TTS_TRANSLATOR_SOURCE_LANGUAGE=auto
 LIVE_TTS_TRANSLATOR_TARGET_LANGUAGE=it
-LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS=2000
+LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS=1400
 
 LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=60
 LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=150
@@ -289,7 +289,7 @@ OmniVoice.
 una lingua target (`target_language`). Il prompt CAVADALABS viene escluso e il LLM
 riceve solo istruzioni di traduzione fedele. Il timing `parla subito` chiude i
 pezzi audio con un buffer configurabile (`LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS`,
-default 2000 ms) per evitare traduzioni di parole isolate. Il timing `fine parlato`
+default 1400 ms) per evitare traduzioni di parole isolate. Il timing `fine parlato`
 usa il VAD normale e aspetta turni piu' completi.
 
 Se usi `whisper.py` come server HTTP, anche `/transcribe` accetta il campo form
