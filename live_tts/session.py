@@ -23,6 +23,12 @@ from live_tts.audio import (
     pcm16_bytes_from_float32,
 )
 from live_tts.config import LiveTTSConfig
+from live_tts.languages import (
+    SOURCE_LANGUAGE_OPTIONS,
+    SUPPORTED_LANGUAGES,
+    language_label,
+    normalize_language_code,
+)
 from live_tts.llm import LLMStreamer
 from live_tts.playback import drain_segment_queue
 from live_tts.rag import RAGResult, RAGRetriever
@@ -36,20 +42,18 @@ from live_tts.voice import VoiceSessionConfig
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_LANGUAGES = {
-    "it": "Italiano",
-    "en": "English",
-    "es": "Español",
-    "fr": "Français",
-    "de": "Deutsch",
-}
-
-
 @dataclass
 class TurnRuntime:
     turn_id: int
     cancel: threading.Event
     task: asyncio.Task | None = None
+
+
+@dataclass
+class QueuedTurn:
+    runtime: TurnRuntime
+    samples: np.ndarray
+    sample_rate: int
 
 
 class RealtimeSession:
@@ -93,6 +97,32 @@ class RealtimeSession:
         self.recorder = AsyncSessionRecorder(config, self.session_id)
         self.turn_counter = 0
         self.current: TurnRuntime | None = None
+        self.mode = self._normalize_mode(config.live_mode)
+        self.translation_timing = self._normalize_translation_timing(
+            config.translator_timing
+        )
+        self.source_language = normalize_language_code(
+            config.translator_source_language,
+            default="auto",
+            allow_auto=True,
+        )
+        self.target_language = normalize_language_code(
+            config.translator_target_language,
+            default=self.language,
+        )
+        if self.mode == "translator":
+            self.language = self.target_language
+            self.voice_config = VoiceSessionConfig.from_config(
+                config,
+                tts.sample_rate,
+                language=self.language,
+            )
+        self._turn_queue: asyncio.Queue[QueuedTurn] = asyncio.Queue()
+        self._turn_worker_task: asyncio.Task | None = None
+        self._detector_defaults = {
+            "min_turn_ms": config.vad_min_turn_ms,
+            "max_turn_s": config.vad_max_turn_s,
+        }
         self.tts_session_state: TTSTurnState | None = (
             tts.create_turn_state()
             if config.tts_voice_mode.strip().lower().replace("-", "_")
@@ -124,8 +154,15 @@ class RealtimeSession:
             tts_frame_ms=self.config.tts_frame_ms,
             tts_engine=self._tts_engine_status(),
             tts_engines=self._tts_engines(),
+            mode=self.mode,
+            translation_timing=self.translation_timing,
             language=self.language,
             languages=SUPPORTED_LANGUAGES,
+            source_language=self.source_language,
+            source_languages=SOURCE_LANGUAGE_OPTIONS,
+            target_language=self.target_language,
+            translator_immediate_buffer_ms=self.config.translator_immediate_buffer_ms,
+            client_barge_enabled=self._client_barge_enabled(),
             client_barge_threshold=self.config.client_barge_threshold,
             client_barge_stop_ms=self.config.client_barge_stop_ms,
             client_barge_commit_ms=self.config.client_barge_commit_ms,
@@ -162,32 +199,58 @@ class RealtimeSession:
         msg_type = data.get("type")
         if msg_type == "session.start":
             sample_rate = int(data.get("sample_rate") or 48000)
-            self.language = self._normalize_language(data.get("language"))
+            self.mode = self._normalize_mode(data.get("mode", self.config.live_mode))
+            self.translation_timing = self._normalize_translation_timing(
+                data.get("translation_timing", self.config.translator_timing)
+            )
+            self._set_session_languages(data)
             selected_engine = str(data.get("tts_engine") or "").strip()
             if selected_engine and not await self._select_tts_engine(selected_engine):
                 return
             self._refresh_tts_runtime_state()
             self.detector.set_sample_rate(sample_rate)
+            self._configure_detector_for_mode()
             await self.recorder.start(
                 input_sample_rate=sample_rate,
                 output_sample_rate=self.tts.sample_rate,
                 voice_config=self.voice_config,
                 metadata={
                     "client": str(self.websocket.client or "unknown"),
+                    "mode": self.mode,
+                    "translation_timing": self.translation_timing,
                     "language": self.language,
+                    "source_language": self.source_language,
+                    "target_language": self.target_language,
                 },
             )
             logger.info(
-                "session started session_id=%s sample_rate=%s language=%s",
+                "session started session_id=%s sample_rate=%s mode=%s timing=%s "
+                "source_language=%s target_language=%s language=%s",
                 self.session_id,
                 sample_rate,
+                self.mode,
+                self.translation_timing,
+                self.source_language,
+                self.target_language,
                 self.language,
             )
             await self.send_event(
                 "session.started",
                 sample_rate=sample_rate,
+                mode=self.mode,
+                translation_timing=self.translation_timing,
                 language=self.language,
-                language_label=SUPPORTED_LANGUAGES[self.language],
+                language_label=language_label(self.language),
+                source_language=self.source_language,
+                source_language_label=(
+                    SOURCE_LANGUAGE_OPTIONS[self.source_language]
+                    if self.source_language in SOURCE_LANGUAGE_OPTIONS
+                    else self.source_language
+                ),
+                target_language=self.target_language,
+                target_language_label=language_label(self.target_language),
+                translator_immediate_buffer_ms=self.config.translator_immediate_buffer_ms,
+                client_barge_enabled=self._client_barge_enabled(),
                 tts_sample_rate=self.tts.sample_rate,
                 tts_engine=self._tts_engine_status(),
                 recording_dir=(
@@ -321,7 +384,11 @@ class RealtimeSession:
                     self.active_turn_id(),
                 )
                 await self.send_event("vad.speech_start", turn_id=self.active_turn_id())
-                if self.current and not self.current.cancel.is_set():
+                if (
+                    self._client_barge_enabled()
+                    and self.current
+                    and not self.current.cancel.is_set()
+                ):
                     await self.cancel_current_turn("barge_in")
             elif event.type == "speech_end" and event.samples is not None:
                 logger.info(
@@ -337,13 +404,17 @@ class RealtimeSession:
                 await self._start_user_turn(event.samples, event.sample_rate or 48000)
 
     async def _start_user_turn(self, samples: np.ndarray, sample_rate: int) -> None:
-        if self.current and self.current.task and not self.current.task.done():
+        if (
+            not self._uses_turn_queue()
+            and self.current
+            and self.current.task
+            and not self.current.task.done()
+        ):
             await self.cancel_current_turn("new_user_turn")
 
         self.turn_counter += 1
         cancel = threading.Event()
         runtime = TurnRuntime(turn_id=self.turn_counter, cancel=cancel)
-        self.current = runtime
         logger.info(
             "turn queued session_id=%s turn_id=%s sample_rate=%s samples=%s",
             self.session_id,
@@ -351,10 +422,52 @@ class RealtimeSession:
             sample_rate,
             samples.size,
         )
+        if self._uses_turn_queue():
+            await self._turn_queue.put(QueuedTurn(runtime, samples, sample_rate))
+            self._ensure_turn_worker()
+            return
+
+        self.current = runtime
         runtime.task = asyncio.create_task(
             self._process_turn(runtime, samples, sample_rate),
             name=f"live-tts-turn-{runtime.turn_id}",
         )
+
+    def _ensure_turn_worker(self) -> None:
+        if self._turn_worker_task and not self._turn_worker_task.done():
+            return
+        self._turn_worker_task = asyncio.create_task(
+            self._process_turn_queue(),
+            name="live-tts-translation-turn-queue",
+        )
+
+    async def _process_turn_queue(self) -> None:
+        try:
+            while not self.closed:
+                try:
+                    queued = await asyncio.wait_for(self._turn_queue.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    if self._turn_queue.empty():
+                        break
+                    continue
+                runtime = queued.runtime
+                if runtime.cancel.is_set():
+                    self._turn_queue.task_done()
+                    continue
+                self.current = runtime
+                runtime.task = asyncio.current_task()
+                try:
+                    await self._process_turn(
+                        runtime,
+                        queued.samples,
+                        queued.sample_rate,
+                    )
+                finally:
+                    runtime.task = None
+                    self._turn_queue.task_done()
+        finally:
+            if self._turn_worker_task is asyncio.current_task():
+                self._turn_worker_task = None
 
     async def _process_turn(
         self, runtime: TurnRuntime, samples: np.ndarray, sample_rate: int
@@ -384,10 +497,11 @@ class RealtimeSession:
             wav_bytes = float32_to_wav_bytes(stt_samples, sample_rate)
 
             stt_started = time.monotonic()
+            stt_language = self._stt_language()
             stt_result = await self.stt.transcribe(
                 wav_bytes,
                 runtime.cancel,
-                language=self.language,
+                language=stt_language,
             )
             if runtime.cancel.is_set():
                 return
@@ -406,7 +520,7 @@ class RealtimeSession:
                 turn_id=turn_id,
                 text=user_text,
                 language=stt_result.get("language"),
-                requested_language=self.language,
+                requested_language=stt_language,
                 latency_ms=stt_latency_ms,
             )
             self.recorder.note_latency("stt_ms", stt_latency_ms)
@@ -431,12 +545,13 @@ class RealtimeSession:
                 turn_started_at=start,
             )
             if not runtime.cancel.is_set():
-                self.history.append({"role": "user", "content": user_text})
-                if assistant_text:
-                    self.history.append(
-                        {"role": "assistant", "content": assistant_text}
-                    )
-                self.history = self.history[-12:]
+                if not self._is_translator():
+                    self.history.append({"role": "user", "content": user_text})
+                    if assistant_text:
+                        self.history.append(
+                            {"role": "assistant", "content": assistant_text}
+                        )
+                    self.history = self.history[-12:]
 
             if not runtime.cancel.is_set():
                 total_latency_ms = int((time.monotonic() - start) * 1000)
@@ -486,13 +601,14 @@ class RealtimeSession:
         async def produce_text() -> None:
             nonlocal rag_result, llm_latency_ms
             nonlocal first_llm_delta_logged, first_segment_logged
+            response_language = self.target_language if self._is_translator() else self.language
             segmenter = SentenceAccumulator(
                 min_first_chars=self.config.segment_min_first_chars,
                 max_first_chars=self.config.segment_max_first_chars,
                 min_next_chars=self.config.segment_min_next_chars,
                 max_next_chars=self.config.segment_max_next_chars,
                 normalize_segments=True,
-                language=self.language,
+                language=response_language,
             )
             try:
                 await self.send_event("assistant.thinking", turn_id=turn_id)
@@ -500,10 +616,14 @@ class RealtimeSession:
                 llm_started = time.monotonic()
                 async for piece in self.llm.stream(
                     user_text,
-                    history,
+                    [] if self._is_translator() else history,
                     runtime.cancel,
-                    language=self.language,
+                    language=response_language,
                     rag_context=rag_result.context,
+                    mode=self.mode,
+                    source_language=self.source_language,
+                    target_language=self.target_language,
+                    live_translation=self._is_translator_immediate(),
                 ):
                     if runtime.cancel.is_set() or self.current is not runtime:
                         break
@@ -711,7 +831,7 @@ class RealtimeSession:
         user_text: str,
         runtime: TurnRuntime,
     ) -> RAGResult:
-        if self.rag is None:
+        if self.rag is None or self._is_translator():
             return RAGResult(False, "", [], 0)
         result = await self.rag.retrieve(user_text, runtime.cancel)
         fallback = bool(result.timed_out or result.error)
@@ -765,36 +885,123 @@ class RealtimeSession:
 
     async def cancel_current_turn(self, reason: str) -> None:
         runtime = self.current
-        if runtime is None:
+        pending = self._drain_pending_turns()
+        if runtime is None and not pending:
             return
-        runtime.cancel.set()
-        if reason == "barge_in":
-            self.recorder.note_barge_in()
-            self.recorder.event(
-                "barge_in",
+
+        if runtime is not None:
+            runtime.cancel.set()
+            if reason == "barge_in":
+                self.recorder.note_barge_in()
+                self.recorder.event(
+                    "barge_in",
+                    turn_id=runtime.turn_id,
+                    reason=reason,
+                )
+            logger.info(
+                "turn cancelled session_id=%s turn_id=%s reason=%s",
+                self.session_id,
+                runtime.turn_id,
+                reason,
+            )
+            if runtime.task and not runtime.task.done():
+                runtime.task.cancel()
+            await self.send_event(
+                "turn.cancelled",
                 turn_id=runtime.turn_id,
                 reason=reason,
             )
-        logger.info(
-            "turn cancelled session_id=%s turn_id=%s reason=%s",
-            self.session_id,
-            runtime.turn_id,
-            reason,
-        )
-        if runtime.task and not runtime.task.done():
-            runtime.task.cancel()
-        await self.send_event(
-            "turn.cancelled",
-            turn_id=runtime.turn_id,
-            reason=reason,
-        )
+
+        for queued in pending:
+            queued.runtime.cancel.set()
+            logger.info(
+                "pending turn cancelled session_id=%s turn_id=%s reason=%s",
+                self.session_id,
+                queued.runtime.turn_id,
+                reason,
+            )
+            await self.send_event(
+                "turn.cancelled",
+                turn_id=queued.runtime.turn_id,
+                reason=reason,
+            )
+
+    def _drain_pending_turns(self) -> list[QueuedTurn]:
+        pending: list[QueuedTurn] = []
+        while True:
+            try:
+                pending.append(self._turn_queue.get_nowait())
+                self._turn_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+        return pending
 
     def active_turn_id(self) -> int | None:
         return self.current.turn_id if self.current else None
 
     def _normalize_language(self, value: object) -> str:
-        language = str(value or self.config.tts_language or "it").strip().lower()
-        return language if language in SUPPORTED_LANGUAGES else "it"
+        return normalize_language_code(value, default=self.config.tts_language or "it")
+
+    def _normalize_mode(self, value: object) -> str:
+        mode = str(value or "agent").strip().lower().replace("-", "_")
+        return "translator" if mode in {"translator", "translation", "translate"} else "agent"
+
+    def _normalize_translation_timing(self, value: object) -> str:
+        timing = str(value or "immediate").strip().lower().replace("-", "_")
+        if timing in {"wait", "wait_end", "wait_end_of_speech", "end", "end_of_speech"}:
+            return "end_of_speech"
+        return "immediate"
+
+    def _set_session_languages(self, data: dict[str, Any]) -> None:
+        if self._is_translator():
+            self.source_language = normalize_language_code(
+                data.get("source_language", self.config.translator_source_language),
+                default="auto",
+                allow_auto=True,
+            )
+            self.target_language = normalize_language_code(
+                data.get("target_language") or data.get("language"),
+                default=self.config.translator_target_language
+                or self.config.tts_language
+                or "it",
+            )
+            self.language = self.target_language
+            return
+
+        self.language = self._normalize_language(data.get("language"))
+        self.source_language = self.language
+        self.target_language = self.language
+
+    def _configure_detector_for_mode(self) -> None:
+        if self._is_translator_immediate():
+            buffer_ms = max(500, int(self.config.translator_immediate_buffer_ms))
+            turn_ms = max(
+                self.config.vad_min_turn_ms,
+                buffer_ms + self.config.vad_preroll_ms,
+            )
+            self.detector.min_turn_ms = turn_ms
+            self.detector.max_turn_s = max(turn_ms / 1000.0, 0.5)
+        else:
+            self.detector.min_turn_ms = int(self._detector_defaults["min_turn_ms"])
+            self.detector.max_turn_s = float(self._detector_defaults["max_turn_s"])
+        self.detector.reset()
+
+    def _stt_language(self) -> str:
+        if self._is_translator():
+            return self.source_language
+        return self.language
+
+    def _client_barge_enabled(self) -> bool:
+        return not self._is_translator()
+
+    def _uses_turn_queue(self) -> bool:
+        return self._is_translator()
+
+    def _is_translator_immediate(self) -> bool:
+        return self._is_translator() and self.translation_timing == "immediate"
+
+    def _is_translator(self) -> bool:
+        return self.mode == "translator"
 
     async def send_event(self, event_type: str, **payload: Any) -> None:
         if self.closed:

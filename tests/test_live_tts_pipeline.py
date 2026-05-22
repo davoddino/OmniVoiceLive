@@ -11,10 +11,13 @@ from types import SimpleNamespace
 import numpy as np
 
 from live_tts.audio import AudioLoudnessSmoother, apply_edge_fade, pad_audio_edges
+from live_tts.languages import SUPPORTED_LANGUAGES, normalize_language_code
+from live_tts.llm import language_instruction, llm_messages, translation_instruction
 from live_tts.playback import drain_segment_queue
 from live_tts.rag import RAGRetriever
 from live_tts.recording import AsyncSessionRecorder
 from live_tts.segmenter import SentenceAccumulator, normalize_tts_text
+from live_tts.stt import STTService
 from live_tts.tts import OmniVoiceTTS, TTSTurnState, normalize_tts_engine
 from live_tts.voice import VoiceSessionConfig
 
@@ -142,6 +145,7 @@ class LiveTTSPipelineTests(unittest.TestCase):
 
         config = voice_config_source()
         config.tts_voice_mode = "fixed_reference"
+        config.tts_fixed_reference_instruct = True
         config.tts_seed = None
         fake_model = FakeModel()
         tts = OmniVoiceTTS(config)
@@ -161,6 +165,104 @@ class LiveTTSPipelineTests(unittest.TestCase):
 
         self.assertEqual(fake_model.kwargs["instruct"], config.tts_instruct)
         self.assertIs(fake_model.kwargs["voice_clone_prompt"], prompt)
+
+    def test_fixed_reference_instruct_is_opt_in_for_ttfa(self) -> None:
+        class FakeModel:
+            def __init__(self) -> None:
+                self.kwargs = {}
+
+            def generate(self, **kwargs):
+                self.kwargs = kwargs
+                return [np.full(480, 0.1, dtype=np.float32)]
+
+        config = voice_config_source()
+        config.tts_voice_mode = "fixed_reference"
+        config.tts_fixed_reference_instruct = False
+        config.tts_seed = None
+        fake_model = FakeModel()
+        tts = OmniVoiceTTS(config)
+        tts.model = fake_model
+        tts.sample_rate = 24000
+
+        tts._synthesize_sync(
+            "Ciao, ti aiuto subito.",
+            True,
+            TTSTurnState(voice_prompt=object()),
+            "it",
+            VoiceSessionConfig.from_config(config, 24000, language="it"),
+        )
+
+        self.assertNotIn("instruct", fake_model.kwargs)
+
+    def test_translation_language_catalog_covers_live_translator_targets(self) -> None:
+        required = {
+            "it",
+            "en",
+            "de",
+            "fr",
+            "es",
+            "pt",
+            "ro",
+            "sq",
+            "ru",
+            "uk",
+            "pl",
+            "sr",
+            "ar",
+            "zh",
+            "hi",
+            "ur",
+            "sw",
+        }
+
+        self.assertTrue(required.issubset(SUPPORTED_LANGUAGES))
+        self.assertEqual(normalize_language_code("zh-CN"), "zh")
+        self.assertEqual(
+            normalize_language_code("auto", allow_auto=True),
+            "auto",
+        )
+
+    def test_translator_prompt_is_strict_and_target_only(self) -> None:
+        prompt = translation_instruction(
+            "auto",
+            "fr",
+            live_translation=True,
+        )
+
+        self.assertIn("Translate from the auto-detected source language into French", prompt)
+        self.assertIn("Preserve numbers, names, places, times, codes", prompt)
+        self.assertIn("Output only in French", prompt)
+        self.assertIn("not isolated words", prompt)
+
+    def test_translator_llm_messages_skip_agent_prompt_history_and_rag(self) -> None:
+        config = SimpleNamespace(system_prompt="CAVADALABS agent prompt")
+        messages = llm_messages(
+            config,
+            "Buongiorno David, sono alle 14:30 in laboratorio.",
+            [{"role": "assistant", "content": "old answer"}],
+            "de",
+            "rag context",
+            mode="translator",
+            source_language="it",
+            target_language="de",
+            live_translation=True,
+        )
+
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[-1]["role"], "user")
+        self.assertNotIn("CAVADALABS", json.dumps(messages))
+        self.assertNotIn("old answer", json.dumps(messages))
+        self.assertIn("Output only in German", messages[0]["content"])
+
+    def test_language_instruction_supports_expanded_languages(self) -> None:
+        self.assertIn("Romanian", language_instruction("ro"))
+        self.assertIn("Simplified Chinese", language_instruction("zh"))
+
+    def test_stt_auto_language_is_passed_through_for_whisper_autodetect(self) -> None:
+        service = STTService(SimpleNamespace(stt_language="it"))
+
+        self.assertEqual(service._requested_language("auto"), "auto")
+        self.assertEqual(service._requested_language(None), "it")
 
 
 class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
@@ -248,6 +350,7 @@ def voice_config_source() -> SimpleNamespace:
         tts_num_step_next=40,
         tts_voice_mode="session_anchor",
         tts_instruct="male, middle-aged, low pitch",
+        tts_fixed_reference_instruct=False,
         tts_language="it",
         tts_postprocess_output=False,
         tts_denoise=True,

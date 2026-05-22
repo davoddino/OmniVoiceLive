@@ -182,6 +182,7 @@ LIVE_TTS_VOICE_ID=cavadalabs_it_male_calm_v1
 LIVE_TTS_REFERENCE_AUDIO=voice_candidates/14.wav
 LIVE_TTS_REFERENCE_TEXT=Ciao! Certo, ti aiuto volentieri. Con CavadaLabs possiamo creare un chatbot per il tuo sito, collegarlo ai contenuti aziendali e renderlo semplice da aggiornare. Partiamo dalle tue esigenze e scegliamo insieme la soluzione piu adatta.
 LIVE_TTS_REFERENCE_PREPROCESS=false
+LIVE_TTS_FIXED_REFERENCE_INSTRUCT=false
 LIVE_TTS_NUM_STEP_FIRST=40
 LIVE_TTS_NUM_STEP_NEXT=40
 LIVE_TTS_SPEED=1.05
@@ -239,6 +240,12 @@ LIVE_TTS_LLM_MODEL=qwen3.6-35b
 LIVE_TTS_SYSTEM_PROMPT_FILE=live_tts/prompts/cavadalabs_voice.md
 LIVE_TTS_LLM_TEMPERATURE=0.3
 
+LIVE_TTS_MODE=agent
+LIVE_TTS_TRANSLATOR_TIMING=immediate
+LIVE_TTS_TRANSLATOR_SOURCE_LANGUAGE=auto
+LIVE_TTS_TRANSLATOR_TARGET_LANGUAGE=it
+LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS=2000
+
 LIVE_TTS_SEGMENT_MIN_FIRST_CHARS=60
 LIVE_TTS_SEGMENT_MAX_FIRST_CHARS=150
 LIVE_TTS_SEGMENT_MIN_NEXT_CHARS=90
@@ -273,11 +280,20 @@ LIVE_TTS_RECORDING_QUEUE_SIZE=256
 LIVE_TTS_RECORDING_PREBUFFER_SECONDS=3.0
 ```
 
-La lingua della conversazione si sceglie dall'interfaccia prima di avviare la
-chiamata. Il browser invia `language` in `session.start`; il backend la usa per
-Whisper, per l'istruzione LLM e per OmniVoice. Se usi `whisper.py` come server
-HTTP, anche `/transcribe` accetta il campo form `language`, quindi non resta in
-auto-detect.
+La modalita' della sessione si sceglie dall'interfaccia prima di avviare la
+chiamata. `Agente` mantiene il comportamento CAVADALABS normale: il browser invia
+`language` in `session.start` e il backend la usa per Whisper, istruzione LLM e
+OmniVoice.
+
+`Traduttore` usa invece una lingua sorgente (`source_language`, anche `auto`) e
+una lingua target (`target_language`). Il prompt CAVADALABS viene escluso e il LLM
+riceve solo istruzioni di traduzione fedele. Il timing `parla subito` chiude i
+pezzi audio con un buffer configurabile (`LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS`,
+default 2000 ms) per evitare traduzioni di parole isolate. Il timing `fine parlato`
+usa il VAD normale e aspetta turni piu' completi.
+
+Se usi `whisper.py` come server HTTP, anche `/transcribe` accetta il campo form
+`language=auto`, quindi Whisper puo' auto-rilevare la lingua sorgente.
 
 Per non perdere l'attacco delle frasi, il browser conserva un piccolo preroll di
 microfono anche mentre il WebSocket si sta aprendo. Il server aggiunge poi 280 ms
@@ -351,6 +367,7 @@ LIVE_TTS_VOICE_MODE=fixed_reference
 LIVE_TTS_REFERENCE_AUDIO=voice_candidates/14.wav
 LIVE_TTS_REFERENCE_TEXT=Ciao! Certo, ti aiuto volentieri. Con CavadaLabs possiamo creare un chatbot per il tuo sito, collegarlo ai contenuti aziendali e renderlo semplice da aggiornare. Partiamo dalle tue esigenze e scegliamo insieme la soluzione piu adatta.
 LIVE_TTS_REFERENCE_PREPROCESS=false
+LIVE_TTS_FIXED_REFERENCE_INSTRUCT=false
 LIVE_TTS_INSTRUCT=male, middle-aged, low pitch
 LIVE_TTS_STARTUP_VOICE_ANCHOR=false
 LIVE_TTS_SESSION_VOICE_ANCHOR=false
@@ -365,9 +382,10 @@ LIVE_TTS_LOUDNESS_NORMALIZATION=true
 LIVE_TTS_CROSSFADE_MS=10
 ```
 
-In `fixed_reference` il riferimento audio resta il condizionamento principale, ma
-l'`instruct` coerente viene passato comunque al modello per rinforzare attributi
-stabili come genere, eta' e pitch senza riestrarre una voce diversa a ogni chunk.
+In `fixed_reference` il riferimento audio resta il condizionamento principale.
+`LIVE_TTS_FIXED_REFERENCE_INSTRUCT=false` evita di aggiungere token di instruct a
+ogni chunk, proteggendo TTFA. Puoi metterlo a `true` solo per un test A/B se il
+reference resta coerente con `LIVE_TTS_INSTRUCT`.
 
 `LIVE_TTS_REFERENCE_PREPROCESS=false` mantiene il file 14 esattamente come e'
 stato generato. `LIVE_TTS_POSITION_TEMPERATURE=0.15` riduce la varianza tra

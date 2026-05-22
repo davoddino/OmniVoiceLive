@@ -21,14 +21,67 @@
             <span id="transportLabel" class="statusBadge">HTTPS/WSS</span>
             <span id="timerLabel" class="timer">00:00</span>
           </div>
+          <label class="languageControl modeControl">
+            <span>Modalità</span>
+            <select id="sessionModeSelect">
+              <option value="agent" selected>Agente</option>
+              <option value="translator">Traduttore</option>
+            </select>
+          </label>
+          <label class="languageControl sourceLanguageControl hidden" id="sourceLanguageControl">
+            <span>Da</span>
+            <select id="sourceLanguageSelect">
+              <option value="auto" selected>Auto rilevamento</option>
+              <option value="it">Italiano</option>
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+              <option value="ro">Română</option>
+              <option value="sq">Shqip</option>
+              <option value="ru">Русский</option>
+              <option value="uk">Українська</option>
+              <option value="pl">Polski</option>
+              <option value="sr">Serbo/Croato/Bosniaco</option>
+              <option value="hr">Hrvatski</option>
+              <option value="bs">Bosanski</option>
+              <option value="ar">العربية</option>
+              <option value="zh">简体中文</option>
+              <option value="hi">हिन्दी</option>
+              <option value="ur">اردو</option>
+              <option value="sw">Kiswahili</option>
+            </select>
+          </label>
           <label class="languageControl">
-            <span>Lingua</span>
+            <span id="languageSelectLabel">Lingua</span>
             <select id="languageSelect">
               <option value="it" selected>Italiano</option>
               <option value="en">English</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
               <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+              <option value="ro">Română</option>
+              <option value="sq">Shqip</option>
+              <option value="ru">Русский</option>
+              <option value="uk">Українська</option>
+              <option value="pl">Polski</option>
+              <option value="sr">Serbo/Croato/Bosniaco</option>
+              <option value="hr">Hrvatski</option>
+              <option value="bs">Bosanski</option>
+              <option value="ar">العربية</option>
+              <option value="zh">简体中文</option>
+              <option value="hi">हिन्दी</option>
+              <option value="ur">اردو</option>
+              <option value="sw">Kiswahili</option>
+            </select>
+          </label>
+          <label class="languageControl timingControl hidden" id="translationTimingControl">
+            <span>Timing</span>
+            <select id="translationTimingSelect">
+              <option value="immediate" selected>Parla subito</option>
+              <option value="end_of_speech">Fine parlato</option>
             </select>
           </label>
           <label class="languageControl engineControl">
@@ -95,6 +148,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=14" type="module"></script>
+    <script src="/static/app.js?v=15" type="module"></script>
   </body>
 </html>

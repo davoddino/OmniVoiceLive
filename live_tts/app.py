@@ -33,11 +33,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def startup() -> None:
     ensure_websocket_support()
     logger.info(
-        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s voice_mode=%s reference_audio=%r reference_preprocess=%s instruct=%r num_step=%s/%s speed=%.2f position_temp=%.2f segments=%s-%s/%s-%s vad_threshold=%.4f vad_adaptive=%s vad_preroll_ms=%s stt_padding_ms=%s/%s rag_enabled=%s recording_enabled=%s client_barge_threshold=%.4f",
+        "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s "
+        "live_mode=%s translator_timing=%s translator_buffer_ms=%s "
+        "voice_mode=%s reference_audio=%r reference_preprocess=%s instruct=%r "
+        "num_step=%s/%s speed=%.2f position_temp=%.2f segments=%s-%s/%s-%s "
+        "vad_threshold=%.4f vad_adaptive=%s vad_preroll_ms=%s "
+        "stt_padding_ms=%s/%s rag_enabled=%s recording_enabled=%s "
+        "client_barge_threshold=%.4f",
         config.tts_backend,
         config.stt_backend,
         config.llm_backend,
         bool(config.ssl_certfile and config.ssl_keyfile),
+        config.live_mode,
+        config.translator_timing,
+        config.translator_immediate_buffer_ms,
         config.tts_voice_mode,
         config.tts_reference_audio if config.tts_voice_mode == "fixed_reference" else "",
         config.tts_reference_preprocess,
@@ -89,6 +98,11 @@ async def health() -> dict[str, object]:
         "tts_instruct": config.tts_instruct,
         "tts_language": config.tts_language,
         "stt_language": config.stt_language,
+        "live_mode": config.live_mode,
+        "translator_timing": config.translator_timing,
+        "translator_source_language": config.translator_source_language,
+        "translator_target_language": config.translator_target_language,
+        "translator_immediate_buffer_ms": config.translator_immediate_buffer_ms,
         "stt_lead_padding_ms": config.stt_lead_padding_ms,
         "stt_tail_padding_ms": config.stt_tail_padding_ms,
         "tts_num_step_first": config.tts_num_step_first,

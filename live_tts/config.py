@@ -184,6 +184,7 @@ class LiveTTSConfig:
     tts_reference_audio: str
     tts_reference_text: str
     tts_reference_preprocess: bool
+    tts_fixed_reference_instruct: bool
 
     qwen_tts_model: str
     qwen_tts_mode: str
@@ -218,6 +219,12 @@ class LiveTTSConfig:
     llm_top_p: float
     llm_timeout_s: float
     system_prompt: str
+
+    live_mode: str
+    translator_timing: str
+    translator_source_language: str
+    translator_target_language: str
+    translator_immediate_buffer_ms: int
 
     segment_min_first_chars: int
     segment_max_first_chars: int
@@ -326,6 +333,9 @@ class LiveTTSConfig:
             tts_reference_preprocess=_env_bool(
                 "LIVE_TTS_REFERENCE_PREPROCESS", False
             ),
+            tts_fixed_reference_instruct=_env_bool(
+                "LIVE_TTS_FIXED_REFERENCE_INSTRUCT", False
+            ),
             qwen_tts_model=_env(
                 "LIVE_TTS_QWEN_MODEL",
                 "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
@@ -379,6 +389,18 @@ class LiveTTSConfig:
             llm_top_p=_env_float("LIVE_TTS_LLM_TOP_P", 1.0),
             llm_timeout_s=_env_float("LIVE_TTS_LLM_TIMEOUT_S", 120.0),
             system_prompt=_configured_system_prompt(),
+            live_mode=_env("LIVE_TTS_MODE", "agent"),
+            translator_timing=_env("LIVE_TTS_TRANSLATOR_TIMING", "immediate"),
+            translator_source_language=_env(
+                "LIVE_TTS_TRANSLATOR_SOURCE_LANGUAGE", "auto"
+            ),
+            translator_target_language=_env(
+                "LIVE_TTS_TRANSLATOR_TARGET_LANGUAGE",
+                os.getenv("LIVE_TTS_LANGUAGE", "it"),
+            ),
+            translator_immediate_buffer_ms=_env_int(
+                "LIVE_TTS_TRANSLATOR_IMMEDIATE_BUFFER_MS", 2000
+            ),
             segment_min_first_chars=_env_int("LIVE_TTS_SEGMENT_MIN_FIRST_CHARS", 60),
             segment_max_first_chars=_env_int("LIVE_TTS_SEGMENT_MAX_FIRST_CHARS", 150),
             segment_min_next_chars=_env_int("LIVE_TTS_SEGMENT_MIN_NEXT_CHARS", 90),

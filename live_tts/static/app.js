@@ -13,15 +13,40 @@ const transportLabel = document.getElementById("transportLabel");
 const connectionLabel = document.getElementById("connectionLabel");
 const audioModeLabel = document.getElementById("audioModeLabel");
 const voiceModeLabel = document.getElementById("voiceModeLabel");
+const sessionModeSelect = document.getElementById("sessionModeSelect");
+const sourceLanguageControl = document.getElementById("sourceLanguageControl");
+const sourceLanguageSelect = document.getElementById("sourceLanguageSelect");
+const languageSelectLabel = document.getElementById("languageSelectLabel");
 const languageSelect = document.getElementById("languageSelect");
+const translationTimingControl = document.getElementById("translationTimingControl");
+const translationTimingSelect = document.getElementById("translationTimingSelect");
 const ttsEngineSelect = document.getElementById("ttsEngineSelect");
 
 const LANGUAGE_LABELS = {
   it: "Italiano",
   en: "English",
-  es: "Español",
-  fr: "Français",
   de: "Deutsch",
+  fr: "Français",
+  es: "Español",
+  pt: "Português",
+  ro: "Română",
+  sq: "Shqip",
+  ru: "Русский",
+  uk: "Українська",
+  pl: "Polski",
+  sr: "Serbo/Croato/Bosniaco",
+  hr: "Hrvatski",
+  bs: "Bosanski",
+  ar: "العربية",
+  zh: "简体中文",
+  hi: "हिन्दी",
+  ur: "اردو",
+  sw: "Kiswahili",
+};
+
+const SOURCE_LANGUAGE_LABELS = {
+  auto: "Auto rilevamento",
+  ...LANGUAGE_LABELS,
 };
 
 const ENGINE_LABELS = {
@@ -61,6 +86,10 @@ let audioStreamingPaused = false;
 let pendingSessionStart = false;
 let pendingMicFrames = [];
 let pendingMicSamples = 0;
+let clientBargeEnabled = true;
+let activeSessionMode = "agent";
+let activeTranslationTiming = "immediate";
+let translatorImmediateBufferMs = 2000;
 
 const pendingMicMaxMs = 1400;
 
@@ -76,14 +105,20 @@ const clientVad = {
 
 startButton.addEventListener("click", startCall);
 stopButton.addEventListener("click", stopCall);
+sessionModeSelect.addEventListener("change", updateModeControls);
+translationTimingSelect.addEventListener("change", updateModeControls);
 ttsEngineSelect.addEventListener("change", onTtsEngineChange);
+updateModeControls();
 
 async function startCall() {
   try {
     cleaningUp = false;
     setState("connecting", "Connessione");
     startButton.disabled = true;
+    sessionModeSelect.disabled = true;
+    sourceLanguageSelect.disabled = true;
     languageSelect.disabled = true;
+    translationTimingSelect.disabled = true;
     ttsEngineSelect.disabled = true;
     transportLabel.textContent =
       location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
@@ -212,6 +247,9 @@ function cleanup(label) {
   fallbackQueuedSamples = 0;
   pendingMicFrames = [];
   pendingMicSamples = 0;
+  clientBargeEnabled = true;
+  activeSessionMode = selectedMode();
+  activeTranslationTiming = selectedTranslationTiming();
   playerBufferedMs = 0;
   assistantSpeaking = false;
   assistantPlaybackActive = false;
@@ -223,12 +261,16 @@ function cleanup(label) {
   resetClientVad();
   stopTimer();
   startButton.disabled = false;
+  sessionModeSelect.disabled = false;
+  sourceLanguageSelect.disabled = false;
   languageSelect.disabled = false;
+  translationTimingSelect.disabled = false;
   ttsEngineSelect.disabled = false;
   stopButton.disabled = true;
   sessionLabel.textContent = label;
   connectionLabel.textContent = "Offline";
   audioModeLabel.textContent = "Audio in attesa";
+  updateModeControls();
   setState("idle", "Idle");
   setTimeout(() => {
     cleaningUp = false;
@@ -421,11 +463,17 @@ function sendSessionStart() {
     return;
   }
   pendingSessionStart = false;
+  activeSessionMode = selectedMode();
+  activeTranslationTiming = selectedTranslationTiming();
   socket.send(
     JSON.stringify({
       type: "session.start",
       sample_rate: audioContext ? audioContext.sampleRate : 48000,
+      mode: activeSessionMode,
       language: selectedLanguage(),
+      source_language: selectedSourceLanguage(),
+      target_language: selectedLanguage(),
+      translation_timing: activeTranslationTiming,
       tts_engine: selectedEngine(),
     }),
   );
@@ -467,6 +515,10 @@ function updateClientVad(frame) {
   }
 
   const now = performance.now();
+  if (!clientBargeEnabled) {
+    clientVad.interruptMs = 0;
+    return;
+  }
   if (
     (isAssistantAudioActive() || audioPlaybackBlocked) &&
     rms >= clientVad.threshold &&
@@ -501,6 +553,9 @@ function updateClientVad(frame) {
 }
 
 function blockAssistantAudioPlayback(rms) {
+  if (!clientBargeEnabled) {
+    return;
+  }
   audioPlaybackBlocked = true;
   blockedAudioTurnId = activeAudioTurnId || currentTurnId;
   assistantSpeaking = false;
@@ -526,6 +581,9 @@ function isAssistantAudioActive() {
 }
 
 function sendBargeIn() {
+  if (!clientBargeEnabled) {
+    return;
+  }
   const now = performance.now();
   if (bargeSent || now - clientVad.lastBargeAt <= clientVad.cooldownMs) {
     return;
@@ -574,16 +632,33 @@ function onSocketMessage(event) {
     case "session.ready":
       ttsSampleRate = message.tts_sample_rate;
       configureClientBargeIn(message);
+      configureLanguages(message.languages, message.source_languages);
+      configureSessionDefaults(message);
       configureTtsEngines(message.tts_engines, message.tts_engine);
       updateEngineStatus(message.tts_engine);
       sessionShortId = message.session_id.slice(0, 8);
-      updateSessionLabel(message.language || selectedLanguage());
+      updateSessionLabel({
+        mode: selectedMode(),
+        language: message.language || selectedLanguage(),
+        sourceLanguage: selectedSourceLanguage(),
+        targetLanguage: selectedLanguage(),
+        translationTiming: selectedTranslationTiming(),
+      });
       break;
     case "session.started":
       sessionStarted = true;
       audioStreamingPaused = false;
+      configureClientBargeIn(message);
+      activeSessionMode = message.mode || selectedMode();
+      activeTranslationTiming = message.translation_timing || selectedTranslationTiming();
       if (message.language) {
-        updateSessionLabel(message.language);
+        updateSessionLabel({
+          mode: activeSessionMode,
+          language: message.language,
+          sourceLanguage: message.source_language || selectedSourceLanguage(),
+          targetLanguage: message.target_language || message.language,
+          translationTiming: activeTranslationTiming,
+        });
       }
       if (message.tts_sample_rate) {
         ttsSampleRate = message.tts_sample_rate;
@@ -730,16 +805,119 @@ function selectedLanguage() {
   return languageSelect ? languageSelect.value : "it";
 }
 
+function selectedSourceLanguage() {
+  return sourceLanguageSelect ? sourceLanguageSelect.value : "auto";
+}
+
+function selectedMode() {
+  return sessionModeSelect ? sessionModeSelect.value : "agent";
+}
+
+function selectedTranslationTiming() {
+  return translationTimingSelect ? translationTimingSelect.value : "immediate";
+}
+
 function selectedEngine() {
   return ttsEngineSelect ? ttsEngineSelect.value : "omnivoice";
 }
 
-function updateSessionLabel(language) {
+function updateSessionLabel(options) {
+  const language = typeof options === "string" ? options : options.language;
+  const mode = typeof options === "string" ? selectedMode() : options.mode;
+  const sourceLanguage =
+    typeof options === "string" ? selectedSourceLanguage() : options.sourceLanguage;
+  const targetLanguage =
+    typeof options === "string" ? language : options.targetLanguage || language;
+  const timing =
+    typeof options === "string" ? selectedTranslationTiming() : options.translationTiming;
   const label = LANGUAGE_LABELS[language] || language || "Italiano";
+  const targetLabel = LANGUAGE_LABELS[targetLanguage] || targetLanguage || label;
+  const sourceLabel =
+    SOURCE_LANGUAGE_LABELS[sourceLanguage] || sourceLanguage || "Auto rilevamento";
+  const modeLabel =
+    mode === "translator"
+      ? `Traduttore ${sourceLabel} -> ${targetLabel}${
+          timing === "immediate" ? " · parla subito" : " · fine parlato"
+        }`
+      : `Agente · ${label}`;
   if (sessionShortId) {
-    sessionLabel.textContent = `Sessione ${sessionShortId} · ${label}`;
+    sessionLabel.textContent = `Sessione ${sessionShortId} · ${modeLabel}`;
   } else {
-    sessionLabel.textContent = `Sessione ${label}`;
+    sessionLabel.textContent = `Sessione ${modeLabel}`;
+  }
+}
+
+function configureLanguages(languages, sourceLanguages) {
+  if (languages && typeof languages === "object") {
+    Object.assign(LANGUAGE_LABELS, languages);
+    populateSelect(languageSelect, languages, selectedLanguage());
+  }
+  if (sourceLanguages && typeof sourceLanguages === "object") {
+    Object.assign(SOURCE_LANGUAGE_LABELS, sourceLanguages);
+    populateSelect(sourceLanguageSelect, sourceLanguages, selectedSourceLanguage());
+  } else if (languages && typeof languages === "object") {
+    populateSelect(
+      sourceLanguageSelect,
+      { auto: SOURCE_LANGUAGE_LABELS.auto, ...languages },
+      selectedSourceLanguage(),
+    );
+  }
+}
+
+function populateSelect(select, options, selected) {
+  if (!select || !options || typeof options !== "object") {
+    return;
+  }
+  const fallback = selected || select.value;
+  select.innerHTML = "";
+  for (const [value, label] of Object.entries(options)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+  if ([...select.options].some((option) => option.value === fallback)) {
+    select.value = fallback;
+  }
+}
+
+function configureSessionDefaults(message) {
+  if (pendingSessionStart || sessionStarted) {
+    if (Number.isFinite(message.translator_immediate_buffer_ms)) {
+      translatorImmediateBufferMs = message.translator_immediate_buffer_ms;
+    }
+    updateModeControls();
+    return;
+  }
+  if (message.mode && sessionModeSelect) {
+    sessionModeSelect.value = message.mode;
+  }
+  if (message.translation_timing && translationTimingSelect) {
+    translationTimingSelect.value = message.translation_timing;
+  }
+  if (message.source_language && sourceLanguageSelect) {
+    sourceLanguageSelect.value = message.source_language;
+  }
+  if (message.target_language && languageSelect) {
+    languageSelect.value = message.target_language;
+  } else if (message.language && languageSelect) {
+    languageSelect.value = message.language;
+  }
+  if (Number.isFinite(message.translator_immediate_buffer_ms)) {
+    translatorImmediateBufferMs = message.translator_immediate_buffer_ms;
+  }
+  updateModeControls();
+}
+
+function updateModeControls() {
+  const translator = selectedMode() === "translator";
+  sourceLanguageControl.classList.toggle("hidden", !translator);
+  translationTimingControl.classList.toggle("hidden", !translator);
+  languageSelectLabel.textContent = translator ? "A" : "Lingua";
+  if (translator && selectedTranslationTiming() === "immediate") {
+    audioModeLabel.textContent = `Traduttore: buffer ${translatorImmediateBufferMs} ms`;
+  } else if (!sessionStarted) {
+    audioModeLabel.textContent = "Audio in attesa";
   }
 }
 
@@ -803,6 +981,9 @@ function enqueueAudio(arrayBuffer) {
 }
 
 function configureClientBargeIn(message) {
+  if (typeof message.client_barge_enabled === "boolean") {
+    clientBargeEnabled = message.client_barge_enabled;
+  }
   if (Number.isFinite(message.client_barge_threshold)) {
     clientVad.threshold = message.client_barge_threshold;
   }

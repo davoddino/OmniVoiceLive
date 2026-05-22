@@ -294,7 +294,10 @@ class OmniVoiceTTS(BaseTTS):
                 "postprocess_output": self.config.tts_postprocess_output,
                 "denoise": self.config.tts_denoise,
             }
-            if voice_config.instruct:
+            if voice_config.instruct and (
+                voice_mode != "fixed_reference"
+                or self.config.tts_fixed_reference_instruct
+            ):
                 kwargs["instruct"] = voice_config.instruct
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt

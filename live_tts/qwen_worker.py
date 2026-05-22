@@ -263,11 +263,23 @@ def qwen_language(value: str) -> str:
         "german": "German",
         "zh": "Chinese",
         "cn": "Chinese",
+        "zh-cn": "Chinese",
         "ja": "Japanese",
         "jp": "Japanese",
         "ko": "Korean",
         "ru": "Russian",
         "pt": "Portuguese",
+        "ro": "Romanian",
+        "sq": "Albanian",
+        "uk": "Ukrainian",
+        "pl": "Polish",
+        "sr": "Serbian",
+        "hr": "Croatian",
+        "bs": "Bosnian",
+        "ar": "Arabic",
+        "hi": "Hindi",
+        "ur": "Urdu",
+        "sw": "Swahili",
     }
     return mapping.get(normalized, value or "Italian")
 

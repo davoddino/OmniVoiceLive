@@ -108,6 +108,8 @@ p {
 .topControls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 12px;
 }
 
@@ -123,8 +125,21 @@ p {
   min-width: 136px;
 }
 
+.modeControl,
+.timingControl {
+  min-width: 130px;
+}
+
+.sourceLanguageControl {
+  min-width: 186px;
+}
+
 .engineControl {
   min-width: 158px;
+}
+
+.hidden {
+  display: none;
 }
 
 .languageControl span {

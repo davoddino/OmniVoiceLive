@@ -33,7 +33,7 @@ class STTService:
         import requests
 
         files = {"file": ("turn.wav", wav_bytes, "audio/wav")}
-        data = {"language": language or self.config.stt_language}
+        data = {"language": self._requested_language(language)}
         response = requests.post(self.config.stt_url, files=files, data=data, timeout=60)
         response.raise_for_status()
         return response.json()
@@ -42,12 +42,14 @@ class STTService:
         self, wav_bytes: bytes, language: str | None
     ) -> dict[str, object]:
         model = self._load_model()
+        requested_language = self._requested_language(language)
+        language_arg = None if requested_language == "auto" else requested_language
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
             tmp.write(wav_bytes)
             tmp.flush()
             segments, info = model.transcribe(
                 tmp.name,
-                language=language or self.config.stt_language,
+                language=language_arg,
                 vad_filter=True,
                 beam_size=1,
                 temperature=0.0,
@@ -78,3 +80,9 @@ class STTService:
                 compute_type=self.config.whisper_compute_type,
             )
             return self._model
+
+    def _requested_language(self, language: str | None) -> str:
+        requested = str(language or "").strip().lower()
+        if requested:
+            return requested
+        return str(self.config.stt_language or "it").strip().lower() or "it"
