@@ -27,6 +27,7 @@ class LLMStreamer:
         source_language: str | None = None,
         target_language: str | None = None,
         live_translation: bool = False,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
         if not self.config.llm_url:
             raise RuntimeError("LIVE_TTS_LLM_URL is required when LLM backend is openai")
@@ -41,6 +42,7 @@ class LLMStreamer:
             source_language,
             target_language,
             live_translation,
+            system_prompt,
         ):
             yield piece
 
@@ -55,6 +57,7 @@ class LLMStreamer:
         source_language: str | None,
         target_language: str | None,
         live_translation: bool,
+        system_prompt: str | None,
     ) -> AsyncIterator[str]:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
@@ -73,6 +76,7 @@ class LLMStreamer:
                     source_language=source_language,
                     target_language=target_language,
                     live_translation=live_translation,
+                    system_prompt=system_prompt,
                 )
                 payload = {
                     "model": self.config.llm_model,
@@ -183,6 +187,7 @@ def llm_messages(
     source_language: str | None = None,
     target_language: str | None = None,
     live_translation: bool = False,
+    system_prompt: str | None = None,
 ) -> list[dict[str, str]]:
     if mode == "translator":
         return [
@@ -198,7 +203,7 @@ def llm_messages(
         ]
 
     return [
-        {"role": "system", "content": config.system_prompt},
+        {"role": "system", "content": system_prompt or config.system_prompt},
         {"role": "system", "content": language_instruction(language)},
         *([rag_system_message(rag_context)] if rag_context else []),
         *history[-10:],

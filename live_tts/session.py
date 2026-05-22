@@ -88,6 +88,8 @@ class RealtimeSession:
             continue_multiplier=config.vad_continue_multiplier,
         )
         self.history: list[dict[str, str]] = []
+        self.agent_system_prompt = config.system_prompt
+        self.agent_prompt_mode = "default"
         self.language = self._normalize_language(config.tts_language)
         self.voice_config = VoiceSessionConfig.from_config(
             config,
@@ -204,6 +206,7 @@ class RealtimeSession:
                 data.get("translation_timing", self.config.translator_timing)
             )
             self._set_session_languages(data)
+            self._set_agent_prompt(data)
             selected_engine = str(data.get("tts_engine") or "").strip()
             if selected_engine and not await self._select_tts_engine(selected_engine):
                 return
@@ -240,6 +243,7 @@ class RealtimeSession:
                 mode=self.mode,
                 translation_timing=self.translation_timing,
                 language=self.language,
+                agent_prompt_mode=self.agent_prompt_mode,
                 language_label=language_label(self.language),
                 source_language=self.source_language,
                 source_language_label=(
@@ -624,6 +628,9 @@ class RealtimeSession:
                     source_language=self.source_language,
                     target_language=self.target_language,
                     live_translation=self._is_translator_immediate(),
+                    system_prompt=(
+                        self.agent_system_prompt if not self._is_translator() else None
+                    ),
                 ):
                     if runtime.cancel.is_set() or self.current is not runtime:
                         break
@@ -971,6 +978,21 @@ class RealtimeSession:
         self.language = self._normalize_language(data.get("language"))
         self.source_language = self.language
         self.target_language = self.language
+
+    def _set_agent_prompt(self, data: dict[str, Any]) -> None:
+        if self._is_translator():
+            self.agent_system_prompt = self.config.system_prompt
+            self.agent_prompt_mode = "default"
+            return
+
+        prompt_mode = str(data.get("agent_prompt_mode") or "default").strip().lower()
+        custom_prompt = str(data.get("agent_prompt") or "").strip()
+        if prompt_mode == "custom" and custom_prompt:
+            self.agent_system_prompt = custom_prompt[:12000]
+            self.agent_prompt_mode = "custom"
+        else:
+            self.agent_system_prompt = self.config.system_prompt
+            self.agent_prompt_mode = "default"
 
     def _configure_detector_for_mode(self) -> None:
         if self._is_translator_immediate():

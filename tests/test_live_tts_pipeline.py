@@ -16,6 +16,7 @@ from live_tts.audio import (
     pad_audio_edges,
     trim_tts_onset_noise,
 )
+from live_tts.event_rooms import EventRoomManager, normalize_event_code
 from live_tts.languages import (
     SUPPORTED_LANGUAGES,
     normalize_language_code,
@@ -309,6 +310,20 @@ class LiveTTSPipelineTests(unittest.TestCase):
         self.assertNotIn("old answer", json.dumps(messages))
         self.assertIn("Output only in German", messages[0]["content"])
 
+    def test_agent_llm_messages_accept_custom_system_prompt(self) -> None:
+        config = SimpleNamespace(system_prompt="Default CavadaLabs prompt")
+        messages = llm_messages(
+            config,
+            "Hello",
+            [],
+            "en",
+            "",
+            system_prompt="Custom assistant behavior",
+        )
+
+        self.assertEqual(messages[0]["content"], "Custom assistant behavior")
+        self.assertIn("Answer only in English", messages[1]["content"])
+
     def test_language_instruction_supports_expanded_languages(self) -> None:
         self.assertIn("Romanian", language_instruction("ro"))
         self.assertIn("Simplified Chinese", language_instruction("zh"))
@@ -381,6 +396,158 @@ class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.timed_out)
         self.assertLess(result.latency_ms, 100)
 
+    async def test_event_room_translates_and_streams_audio_to_listeners(self) -> None:
+        config = event_config()
+        stt = FakeEventSTT()
+        llm = FakeEventLLM()
+        tts = FakeEventTTS()
+        manager = EventRoomManager(config, stt, llm, tts)
+        speaker = MemoryEventPeer("speaker")
+        room = await manager.create_room(
+            speaker,
+            source_language="auto",
+            speaker_sample_rate=16000,
+            code="AB-123",
+        )
+        listener_fr = MemoryEventPeer("listener", target_language="fr")
+        listener_de = MemoryEventPeer("listener", target_language="de")
+        await room.add_listener(listener_fr)
+        await room.add_listener(listener_de)
+
+        await room.process_turn(np.full(1600, 0.04, dtype=np.float32), 16000)
+
+        self.assertEqual(room.code, "AB123")
+        self.assertEqual(stt.requested_language, "auto")
+        self.assertEqual([call["target_language"] for call in llm.calls], ["de", "fr"])
+        self.assertEqual([call["language"] for call in tts.calls], ["de", "fr"])
+        self.assertTrue(any(event["type"] == "event.source_text" for event in speaker.events))
+        self.assertTrue(
+            any(
+                event["type"] == "event.translation_final"
+                and event["target_language"] == "fr"
+                for event in listener_fr.events
+            )
+        )
+        self.assertTrue(listener_fr.audio)
+        self.assertTrue(listener_de.audio)
+
+        await manager.close_room("AB123", reason="test_done")
+        self.assertIsNone(await manager.get_room("AB123"))
+
+    async def test_event_room_updates_listener_language(self) -> None:
+        config = event_config()
+        manager = EventRoomManager(config, FakeEventSTT(), FakeEventLLM(), FakeEventTTS())
+        room = await manager.create_room(
+            MemoryEventPeer("speaker"),
+            source_language="it",
+            speaker_sample_rate=16000,
+            code="ROOM1",
+        )
+        listener = MemoryEventPeer("listener", target_language="en")
+        await room.add_listener(listener)
+
+        await room.update_listener_language(listener.client_id, "es")
+
+        self.assertEqual(await room.target_languages(), ["es"])
+        self.assertEqual(normalize_event_code(" room-1 "), "ROOM1")
+
+
+class MemoryEventPeer:
+    def __init__(self, role: str, target_language: str | None = None) -> None:
+        self.client_id = f"{role}-{id(self)}"
+        self.role = role
+        self.target_language = target_language
+        self.closed = False
+        self.events: list[dict[str, object]] = []
+        self.audio: list[bytes] = []
+
+    async def send_event(self, event_type: str, **payload) -> None:
+        self.events.append({"type": event_type, **payload})
+
+    async def send_bytes(self, payload: bytes) -> None:
+        self.audio.append(payload)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakeEventSTT:
+    def __init__(self) -> None:
+        self.requested_language: str | None = None
+
+    async def transcribe(self, wav_bytes, cancel_event, language=None):
+        self.requested_language = language
+        return {"text": "Good morning everyone.", "language": "en"}
+
+
+class FakeEventLLM:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def stream(
+        self,
+        prompt,
+        history,
+        cancel_event,
+        language=None,
+        rag_context="",
+        mode="agent",
+        source_language=None,
+        target_language=None,
+        live_translation=False,
+        system_prompt=None,
+    ):
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "mode": mode,
+                "source_language": source_language,
+                "target_language": target_language,
+                "live_translation": live_translation,
+            }
+        )
+        yield f"Translated to {target_language}."
+
+
+class FakeEventTTS:
+    sample_rate = 24000
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create_turn_state(self) -> TTSTurnState:
+        return TTSTurnState()
+
+    async def synthesize(
+        self,
+        text,
+        first,
+        state=None,
+        language=None,
+        voice_config=None,
+    ):
+        self.calls.append({"text": text, "first": first, "language": language})
+        return np.full(1200, 0.04, dtype=np.float32)
+
+    def status(self) -> dict[str, object]:
+        return {
+            "engine": "omnivoice",
+            "status": "ready",
+            "sample_rate": self.sample_rate,
+            "error": "",
+        }
+
+    def engines(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "omnivoice",
+                "label": "OmniVoice",
+                "description": "Test engine.",
+                "kind": "local",
+                "status": "ready",
+            }
+        ]
+
 
 def voice_config_source() -> SimpleNamespace:
     return SimpleNamespace(
@@ -429,3 +596,26 @@ def rag_config() -> SimpleNamespace:
         rag_max_chunks=3,
         rag_max_context_chars=2500,
     )
+
+
+def event_config() -> SimpleNamespace:
+    config = voice_config_source()
+    config.translator_target_language = "en"
+    config.vad_speech_threshold = 0.020
+    config.vad_adaptive = False
+    config.vad_noise_calibration_ms = 100
+    config.vad_start_multiplier = 2.2
+    config.vad_continue_multiplier = 1.4
+    config.vad_start_ms = 80
+    config.vad_end_ms = 120
+    config.vad_min_turn_ms = 120
+    config.vad_preroll_ms = 100
+    config.vad_max_turn_s = 8.0
+    config.stt_lead_padding_ms = 20
+    config.stt_tail_padding_ms = 20
+    config.segment_min_first_chars = 8
+    config.segment_max_first_chars = 120
+    config.segment_min_next_chars = 8
+    config.segment_max_next_chars = 120
+    config.tts_frame_ms = 40
+    return config

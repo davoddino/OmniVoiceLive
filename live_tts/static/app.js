@@ -13,39 +13,74 @@ const transportLabel = document.getElementById("transportLabel");
 const connectionLabel = document.getElementById("connectionLabel");
 const audioModeLabel = document.getElementById("audioModeLabel");
 const voiceModeLabel = document.getElementById("voiceModeLabel");
-const sessionModeSelect = document.getElementById("sessionModeSelect");
-const sourceLanguageControl = document.getElementById("sourceLanguageControl");
-const sourceLanguageSelect = document.getElementById("sourceLanguageSelect");
-const languageSelectLabel = document.getElementById("languageSelectLabel");
+const listenerCountLabel = document.getElementById("listenerCountLabel");
+const timelineTitle = document.getElementById("timelineTitle");
+const roomBadge = document.getElementById("roomBadge");
+
+const roomTabs = [...document.querySelectorAll(".roomTab")];
+const assistantRoom = document.getElementById("assistantRoom");
+const translatorRoom = document.getElementById("translatorRoom");
+const eventRoom = document.getElementById("eventRoom");
+const roomPanels = {
+  assistant: assistantRoom,
+  translator: translatorRoom,
+  event: eventRoom,
+};
+
 const languageSelect = document.getElementById("languageSelect");
-const translationTimingControl = document.getElementById("translationTimingControl");
-const translationTimingSelect = document.getElementById("translationTimingSelect");
+const assistantPromptModeSelect = document.getElementById("assistantPromptModeSelect");
+const customPromptWrap = document.getElementById("customPromptWrap");
+const customPromptInput = document.getElementById("customPromptInput");
 const ttsEngineSelect = document.getElementById("ttsEngineSelect");
+const sourceLanguageSelect = document.getElementById("sourceLanguageSelect");
+const translatorTargetLanguageSelect = document.getElementById(
+  "translatorTargetLanguageSelect",
+);
+const translationTimingSelect = document.getElementById("translationTimingSelect");
+const translatorTtsEngineSelect = document.getElementById("translatorTtsEngineSelect");
+
+const eventSpeakerRoleButton = document.getElementById("eventSpeakerRoleButton");
+const eventListenerRoleButton = document.getElementById("eventListenerRoleButton");
+const eventSpeakerPanel = document.getElementById("eventSpeakerPanel");
+const eventListenerPanel = document.getElementById("eventListenerPanel");
+const eventSourceLanguageSelect = document.getElementById("eventSourceLanguageSelect");
+const eventTargetLanguageSelect = document.getElementById("eventTargetLanguageSelect");
+const eventTtsEngineSelect = document.getElementById("eventTtsEngineSelect");
+const eventCodeInput = document.getElementById("eventCodeInput");
+const eventCodeDisplay = document.getElementById("eventCodeDisplay");
+
+const targetLanguageSelects = [
+  languageSelect,
+  translatorTargetLanguageSelect,
+  eventTargetLanguageSelect,
+];
+const sourceLanguageSelects = [sourceLanguageSelect, eventSourceLanguageSelect];
+const engineSelects = [ttsEngineSelect, translatorTtsEngineSelect, eventTtsEngineSelect];
 
 const LANGUAGE_LABELS = {
-  it: "Italiano",
+  it: "Italian",
   en: "English",
-  de: "Tedesco (Deutsch)",
-  fr: "Francese (Français)",
-  es: "Spagnolo (Español)",
-  pt: "Portoghese (Português)",
-  ro: "Rumeno (Română)",
-  sq: "Albanese (Shqip)",
-  ru: "Russo (Русский)",
-  uk: "Ucraino (Українська)",
-  pl: "Polski",
-  sr: "Serbo/Croato/Bosniaco",
-  hr: "Croato (Hrvatski)",
-  bs: "Bosniaco (Bosanski)",
-  ar: "Arabo (العربية)",
-  zh: "Cinese semplificato (简体中文)",
-  hi: "Hindi (हिन्दी)",
-  ur: "Urdu (اردو)",
-  sw: "Swahili (Kiswahili)",
+  de: "German",
+  fr: "French",
+  es: "Spanish",
+  pt: "Portuguese",
+  ro: "Romanian",
+  sq: "Albanian",
+  ru: "Russian",
+  uk: "Ukrainian",
+  pl: "Polish",
+  sr: "Serbian/Croatian/Bosnian",
+  hr: "Croatian",
+  bs: "Bosnian",
+  ar: "Arabic",
+  zh: "Simplified Chinese",
+  hi: "Hindi",
+  ur: "Urdu",
+  sw: "Swahili",
 };
 
 const SOURCE_LANGUAGE_LABELS = {
-  auto: "Auto rilevamento",
+  auto: "Auto-detect",
   ...LANGUAGE_LABELS,
 };
 
@@ -54,7 +89,16 @@ const ENGINE_LABELS = {
   qwen3_tts: "Qwen3-TTS",
 };
 
+const ROOM_TITLES = {
+  assistant: "Virtual Assistant",
+  translator: "Instant Translator",
+  event: "Event Interpreter",
+};
+
 let socket = null;
+let activeProtocol = "";
+let activeRoom = "assistant";
+let activeEventRole = "speaker";
 let audioContext = null;
 let recorderNode = null;
 let recorderSinkNode = null;
@@ -66,6 +110,7 @@ let fallbackPlayerOffset = 0;
 let fallbackQueuedSamples = 0;
 let fallbackBufferLastAt = 0;
 let activeAssistantMessage = null;
+let activeEventMessages = new Map();
 let assistantSpeaking = false;
 let assistantPlaybackActive = false;
 let assistantDonePending = false;
@@ -105,87 +150,144 @@ const clientVad = {
 
 startButton.addEventListener("click", startCall);
 stopButton.addEventListener("click", stopCall);
-sessionModeSelect.addEventListener("change", updateModeControls);
-sourceLanguageSelect.addEventListener("change", switchToTranslatorFromLanguageControl);
-languageSelect.addEventListener("change", updateModeControls);
-translationTimingSelect.addEventListener("change", updateModeControls);
-ttsEngineSelect.addEventListener("change", onTtsEngineChange);
-updateModeControls();
+assistantPromptModeSelect.addEventListener("change", updateRoomControls);
+translationTimingSelect.addEventListener("change", updateRoomControls);
+languageSelect.addEventListener("change", updateRoomControls);
+translatorTargetLanguageSelect.addEventListener("change", updateRoomControls);
+sourceLanguageSelect.addEventListener("change", updateRoomControls);
+eventSourceLanguageSelect.addEventListener("change", updateRoomControls);
+eventTargetLanguageSelect.addEventListener("change", onEventTargetLanguageChange);
+eventCodeInput.addEventListener("input", () => {
+  eventCodeInput.value = normalizeEventCode(eventCodeInput.value);
+});
 
-async function startCall() {
-  try {
-    cleaningUp = false;
-    setState("connecting", "Connessione");
-    startButton.disabled = true;
-    sessionModeSelect.disabled = true;
-    sourceLanguageSelect.disabled = true;
-    languageSelect.disabled = true;
-    translationTimingSelect.disabled = true;
-    ttsEngineSelect.disabled = true;
-    transportLabel.textContent =
-      location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
-    connectionLabel.textContent = "Avvio";
+for (const tab of roomTabs) {
+  tab.addEventListener("click", () => switchRoom(tab.dataset.room));
+}
+
+for (const button of [eventSpeakerRoleButton, eventListenerRoleButton]) {
+  button.addEventListener("click", () => switchEventRole(button.dataset.role));
+}
+
+for (const select of engineSelects) {
+  select.addEventListener("change", () => {
     updateEngineStatus({
       engine: selectedEngine(),
-      status: "connecting",
+      status: socket && socket.readyState === WebSocket.OPEN ? "loading" : "selected",
       sample_rate: ttsSampleRate,
     });
-
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      throw new Error("Web Audio API non disponibile in questo browser.");
+    if (
+      activeProtocol !== "realtime" ||
+      !socket ||
+      socket.readyState !== WebSocket.OPEN
+    ) {
+      return;
     }
-    addSystemMessage("INFO: Creo AudioContext.");
-    audioContext = new AudioContextClass({ latencyHint: "interactive" });
-    addSystemMessage(
-      `INFO: AudioContext state=${audioContext.state}, sampleRate=${audioContext.sampleRate}.`,
+    audioStreamingPaused = true;
+    clearPlayer();
+    socket.send(
+      JSON.stringify({
+        type: "tts.engine.select",
+        engine: selectedEngine(),
+      }),
     );
+  });
+}
 
-    addSystemMessage("INFO: Richiedo accesso al microfono.");
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    });
-    addSystemMessage("INFO: Microfono autorizzato.");
-    const source = audioContext.createMediaStreamSource(mediaStream);
+updateRoomControls();
 
-    const canUseWorklet = Boolean(audioContext.audioWorklet && window.AudioWorkletNode);
-    if (canUseWorklet) {
-      try {
-        await setupAudioWorkletGraph(source);
-        audioModeLabel.textContent = "AudioWorklet";
-        addSystemMessage("INFO: AudioWorklet attivo.");
-      } catch (error) {
-        addSystemMessage(
-          `INFO: AudioWorklet non disponibile, uso fallback iOS. Dettaglio: ${error.message}`,
-        );
-        setupScriptProcessorGraph(source);
-        audioModeLabel.textContent = "Fallback iOS";
-      }
-    } else {
-      addSystemMessage("INFO: AudioWorklet non disponibile, uso fallback iOS.");
-      setupScriptProcessorGraph(source);
-      audioModeLabel.textContent = "Fallback iOS";
-    }
+async function startCall() {
+  if (activeRoom === "event" && activeEventRole === "listener") {
+    await startEventListener();
+    return;
+  }
+  if (activeRoom === "event") {
+    await startEventSpeaker();
+    return;
+  }
+  await startRealtimeCall();
+}
 
-    connectWebSocket();
+async function startRealtimeCall() {
+  try {
+    beginStartup("Connecting");
+    activeProtocol = "realtime";
+    activeSessionMode = activeRoom === "translator" ? "translator" : "agent";
+    clientBargeEnabled = activeSessionMode !== "translator";
+    await setupInputAudioGraph();
+    connectRealtimeWebSocket();
     resumeAudioContextWithTimeout();
   } catch (error) {
-    cleanup("Avvio non riuscito");
-    setState("error", "Errore");
-    addSystemMessage(error.message || "Impossibile avviare audio e microfono.");
+    cleanup("Start failed");
+    setState("error", "Error");
+    addSystemMessage(error.message || "Unable to start audio and microphone.");
   }
+}
+
+async function startEventSpeaker() {
+  try {
+    beginStartup("Starting event");
+    activeProtocol = "event_speaker";
+    clientBargeEnabled = false;
+    await setupInputAudioGraph();
+    connectEventSpeakerWebSocket();
+    resumeAudioContextWithTimeout();
+  } catch (error) {
+    cleanup("Event start failed");
+    setState("error", "Error");
+    addSystemMessage(error.message || "Unable to start the event speaker.");
+  }
+}
+
+async function startEventListener() {
+  const code = normalizeEventCode(eventCodeInput.value);
+  if (!code) {
+    addSystemMessage("Enter an event code before joining.");
+    setState("error", "Error");
+    return;
+  }
+  try {
+    beginStartup("Joining event");
+    activeProtocol = "event_listener";
+    clientBargeEnabled = false;
+    await setupPlaybackOnlyGraph();
+    connectEventListenerWebSocket(code);
+    resumeAudioContextWithTimeout();
+  } catch (error) {
+    cleanup("Join failed");
+    setState("error", "Error");
+    addSystemMessage(error.message || "Unable to join the event.");
+  }
+}
+
+function beginStartup(label) {
+  cleaningUp = false;
+  setState("connecting", label);
+  setControlsDisabled(true);
+  startButton.disabled = true;
+  stopButton.disabled = true;
+  transportLabel.textContent =
+    location.protocol === "https:" ? "HTTPS/WSS" : "HTTP/WS";
+  connectionLabel.textContent = "Starting";
+  listenerCountLabel.textContent = "0";
+  updateEngineStatus({
+    engine: selectedEngine(),
+    status: "connecting",
+    sample_rate: ttsSampleRate,
+  });
 }
 
 function stopCall() {
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: "session.stop" }));
+    if (activeProtocol === "event_speaker") {
+      socket.send(JSON.stringify({ type: "event.host.stop" }));
+    } else if (activeProtocol === "event_listener") {
+      socket.send(JSON.stringify({ type: "event.listener.leave" }));
+    } else {
+      socket.send(JSON.stringify({ type: "session.stop" }));
+    }
   }
-  cleanup("Chiamata terminata");
+  cleanup("Session ended");
 }
 
 function cleanup(label) {
@@ -194,9 +296,7 @@ function cleanup(label) {
     clearTimeout(socketOpenTimer);
     socketOpenTimer = null;
   }
-  if (playerNode) {
-    clearPlayer();
-  }
+  clearPlayer();
   if (recorderNode) {
     try {
       recorderNode.disconnect();
@@ -234,6 +334,7 @@ function cleanup(label) {
     audioContext.close().catch(() => {});
   }
   socket = null;
+  activeProtocol = "";
   socketWasOpen = false;
   sessionShortId = null;
   sessionStarted = false;
@@ -249,9 +350,6 @@ function cleanup(label) {
   fallbackQueuedSamples = 0;
   pendingMicFrames = [];
   pendingMicSamples = 0;
-  clientBargeEnabled = true;
-  activeSessionMode = selectedMode();
-  activeTranslationTiming = selectedTranslationTiming();
   playerBufferedMs = 0;
   assistantSpeaking = false;
   assistantPlaybackActive = false;
@@ -260,38 +358,82 @@ function cleanup(label) {
   audioPlaybackBlocked = false;
   activeAudioTurnId = null;
   blockedAudioTurnId = null;
+  activeAssistantMessage = null;
+  activeEventMessages = new Map();
   resetClientVad();
   stopTimer();
+  setControlsDisabled(false);
   startButton.disabled = false;
-  sessionModeSelect.disabled = false;
-  sourceLanguageSelect.disabled = false;
-  languageSelect.disabled = false;
-  translationTimingSelect.disabled = false;
-  ttsEngineSelect.disabled = false;
   stopButton.disabled = true;
   sessionLabel.textContent = label;
   connectionLabel.textContent = "Offline";
-  audioModeLabel.textContent = "Audio in attesa";
-  updateModeControls();
+  audioModeLabel.textContent = "Audio idle";
+  eventCodeDisplay.textContent = activeEventRole === "speaker" ? "Not hosted" : "-";
+  listenerCountLabel.textContent = "0";
+  updateRoomControls();
   setState("idle", "Idle");
   setTimeout(() => {
     cleaningUp = false;
   }, 0);
 }
 
-function onMicFrame(event) {
-  const frame = event.data;
-  updateClientVad(frame);
-  if (
-    !socket ||
-    socket.readyState !== WebSocket.OPEN ||
-    !sessionStarted ||
-    audioStreamingPaused
-  ) {
-    rememberPendingMicFrame(frame);
-    return;
+async function setupInputAudioGraph() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    throw new Error("Web Audio API is not available in this browser.");
   }
-  socket.send(frame.buffer);
+  audioContext = new AudioContextClass({ latencyHint: "interactive" });
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+    },
+  });
+  addSystemMessage("Microphone ready.");
+  const source = audioContext.createMediaStreamSource(mediaStream);
+  const canUseWorklet = Boolean(audioContext.audioWorklet && window.AudioWorkletNode);
+  if (canUseWorklet) {
+    try {
+      await setupAudioWorkletGraph(source);
+      audioModeLabel.textContent = "AudioWorklet";
+      return;
+    } catch (error) {
+      addSystemMessage(`Audio fallback enabled: ${error.message}`);
+    }
+  }
+  setupScriptProcessorGraph(source);
+  audioModeLabel.textContent = "Fallback audio";
+}
+
+async function setupPlaybackOnlyGraph() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    throw new Error("Web Audio API is not available in this browser.");
+  }
+  audioContext = new AudioContextClass({ latencyHint: "interactive" });
+  const canUseWorklet = Boolean(audioContext.audioWorklet && window.AudioWorkletNode);
+  if (canUseWorklet) {
+    try {
+      await audioContext.audioWorklet.addModule("/static/player-worklet.js?v=2");
+      playerNode = new AudioWorkletNode(audioContext, "player-worklet");
+      playerNode.connect(audioContext.destination);
+      playerNode.port.onmessage = (event) => {
+        if (event.data.type === "buffer") {
+          updatePlayerBuffer(event.data.ms);
+        }
+      };
+      audioModeLabel.textContent = "Playback ready";
+      return;
+    } catch (error) {
+      addSystemMessage(`Playback fallback enabled: ${error.message}`);
+    }
+  }
+  playerNode = audioContext.createScriptProcessor(1024, 0, 1);
+  playerNode.onaudioprocess = onFallbackPlayerProcess;
+  playerNode.connect(audioContext.destination);
+  audioModeLabel.textContent = "Fallback playback";
 }
 
 async function setupAudioWorkletGraph(source) {
@@ -335,40 +477,14 @@ function setupScriptProcessorGraph(source) {
   recorderNode.connect(audioContext.destination);
 }
 
-function connectWebSocket() {
-  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProto}//${location.host}/ws`;
-  addSystemMessage(`INFO: Apro WebSocket ${wsUrl}`);
-  connectionLabel.textContent = "Connessione";
-
-  socketWasOpen = false;
-  socket = new WebSocket(wsUrl);
-  const ws = socket;
-  let wsOpened = false;
-  ws.binaryType = "arraybuffer";
-
-  socketOpenTimer = setTimeout(() => {
-    if (socket === ws && ws.readyState !== WebSocket.OPEN) {
-      addSystemMessage(
-        `INFO: WebSocket ancora non aperto dopo 5s, readyState=${ws.readyState}.`,
-      );
-      setState("error", "Errore");
-      ws.close();
-    }
-  }, 5000);
-
+function connectRealtimeWebSocket() {
+  const ws = openSocket("/ws", "Connecting");
+  pendingSessionStart = false;
   ws.onopen = () => {
     if (socket !== ws) {
       return;
     }
-    wsOpened = true;
-    socketWasOpen = true;
-    if (socketOpenTimer) {
-      clearTimeout(socketOpenTimer);
-      socketOpenTimer = null;
-    }
-    addSystemMessage("INFO: WebSocket aperto.");
-    connectionLabel.textContent = "Online";
+    markSocketOpen("Online");
     pendingSessionStart = true;
     audioStreamingPaused = true;
     ws.send(
@@ -379,8 +495,85 @@ function connectWebSocket() {
     );
     startTimer();
   };
+  ws.onmessage = onRealtimeSocketMessage;
+  bindSocketCloseHandlers(ws);
+}
 
-  ws.onmessage = onSocketMessage;
+function connectEventSpeakerWebSocket() {
+  const ws = openSocket("/ws/event/speaker", "Starting event");
+  audioStreamingPaused = true;
+  ws.onopen = () => {
+    if (socket !== ws) {
+      return;
+    }
+    markSocketOpen("Online");
+    ws.send(
+      JSON.stringify({
+        type: "event.host.start",
+        sample_rate: audioContext ? audioContext.sampleRate : 48000,
+        source_language: eventSourceLanguageSelect.value,
+        tts_engine: selectedEngine(),
+      }),
+    );
+    startTimer();
+  };
+  ws.onmessage = onEventSocketMessage;
+  bindSocketCloseHandlers(ws);
+}
+
+function connectEventListenerWebSocket(code) {
+  const ws = openSocket("/ws/event/listener", "Joining event");
+  ws.onopen = () => {
+    if (socket !== ws) {
+      return;
+    }
+    markSocketOpen("Online");
+    ws.send(
+      JSON.stringify({
+        type: "event.listener.join",
+        event_code: code,
+        target_language: eventTargetLanguageSelect.value,
+      }),
+    );
+    startTimer();
+  };
+  ws.onmessage = onEventSocketMessage;
+  bindSocketCloseHandlers(ws);
+}
+
+function openSocket(path, label) {
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProto}//${location.host}${path}`;
+  addSystemMessage("Connecting to server.");
+  connectionLabel.textContent = label;
+  socketWasOpen = false;
+  socket = new WebSocket(wsUrl);
+  const ws = socket;
+  ws.binaryType = "arraybuffer";
+  socketOpenTimer = setTimeout(() => {
+    if (socket === ws && ws.readyState !== WebSocket.OPEN) {
+      addSystemMessage(`WebSocket did not open after 5s, readyState=${ws.readyState}.`);
+      setState("error", "Error");
+      ws.close();
+    }
+  }, 5000);
+  return ws;
+}
+
+function markSocketOpen(label) {
+  socketWasOpen = true;
+  if (socketOpenTimer) {
+    clearTimeout(socketOpenTimer);
+    socketOpenTimer = null;
+  }
+  connectionLabel.textContent = label;
+}
+
+function bindSocketCloseHandlers(ws) {
+  let wsOpened = false;
+  ws.addEventListener("open", () => {
+    wsOpened = true;
+  });
   ws.onclose = (event) => {
     if (socket !== ws) {
       return;
@@ -394,24 +587,38 @@ function connectWebSocket() {
     }
     const reason = event.reason ? ` reason=${event.reason}` : "";
     if (wsOpened || socketWasOpen || event.code === 1000) {
-      addSystemMessage(`INFO: WebSocket chiuso code=${event.code}${reason}.`);
+      addSystemMessage(`WebSocket closed code=${event.code}${reason}.`);
       connectionLabel.textContent = "Offline";
-      cleanup("Chiamata terminata");
+      cleanup("Session ended");
     } else {
-      cleanup("WebSocket non aperto");
-      setState("error", "Errore");
-      addSystemMessage(`INFO: WebSocket non aperto code=${event.code}${reason}.`);
+      cleanup("WebSocket did not open");
+      setState("error", "Error");
+      addSystemMessage(`WebSocket did not open code=${event.code}${reason}.`);
     }
   };
-
   ws.onerror = () => {
     if (socket !== ws) {
       return;
     }
-    addSystemMessage("INFO: Errore WebSocket. Controlla certificato, IP e firewall.");
-    connectionLabel.textContent = "Errore";
-    setState("error", "Errore");
+    addSystemMessage("WebSocket error. Check certificate, host, and firewall.");
+    connectionLabel.textContent = "Error";
+    setState("error", "Error");
   };
+}
+
+function onMicFrame(event) {
+  const frame = event.data;
+  updateClientVad(frame);
+  if (
+    !socket ||
+    socket.readyState !== WebSocket.OPEN ||
+    !sessionStarted ||
+    audioStreamingPaused
+  ) {
+    rememberPendingMicFrame(frame);
+    return;
+  }
+  socket.send(frame.buffer);
 }
 
 function rememberPendingMicFrame(frame) {
@@ -448,28 +655,9 @@ function flushPendingMicFrames() {
   }
   pendingMicFrames = [];
   pendingMicSamples = 0;
-  addSystemMessage(
-    `INFO: Inviato preroll microfono iniziale ${durationMs} ms (${frameCount} frame).`,
-  );
-}
-
-function onTtsEngineChange() {
-  updateEngineStatus({
-    engine: selectedEngine(),
-    status: socket && socket.readyState === WebSocket.OPEN ? "loading" : "selected",
-    sample_rate: ttsSampleRate,
-  });
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return;
+  if (durationMs > 0 && frameCount > 0) {
+    audioModeLabel.textContent = "Microphone ready";
   }
-  audioStreamingPaused = true;
-  clearPlayer();
-  socket.send(
-    JSON.stringify({
-      type: "tts.engine.select",
-      engine: selectedEngine(),
-    }),
-  );
 }
 
 function sendSessionStart() {
@@ -477,53 +665,393 @@ function sendSessionStart() {
     return;
   }
   pendingSessionStart = false;
-  activeSessionMode = selectedMode();
-  activeTranslationTiming = selectedTranslationTiming();
+  activeSessionMode = activeRoom === "translator" ? "translator" : "agent";
+  activeTranslationTiming = translationTimingSelect.value;
+  const payload = {
+    type: "session.start",
+    sample_rate: audioContext ? audioContext.sampleRate : 48000,
+    mode: activeSessionMode,
+    language: selectedLanguage(),
+    source_language: sourceLanguageSelect.value,
+    target_language: selectedLanguage(),
+    translation_timing: activeTranslationTiming,
+    tts_engine: selectedEngine(),
+  };
+  if (activeSessionMode === "agent") {
+    payload.agent_prompt_mode = assistantPromptModeSelect.value;
+    if (assistantPromptModeSelect.value === "custom") {
+      payload.agent_prompt = customPromptInput.value;
+    }
+  }
   const modeLabel =
-    activeSessionMode === "translator" ? "traduttore live" : "agente CavadaLabs";
-  const targetLabel = LANGUAGE_LABELS[selectedLanguage()] || selectedLanguage();
-  const sourceLabel =
-    SOURCE_LANGUAGE_LABELS[selectedSourceLanguage()] || selectedSourceLanguage();
-  addSystemMessage(
-    activeSessionMode === "translator"
-      ? `INFO: Avvio modalità ${modeLabel}: ${sourceLabel} -> ${targetLabel}, timing=${activeTranslationTiming}.`
-      : `INFO: Avvio modalità ${modeLabel}, lingua=${targetLabel}.`,
-  );
-  socket.send(
-    JSON.stringify({
-      type: "session.start",
-      sample_rate: audioContext ? audioContext.sampleRate : 48000,
-      mode: activeSessionMode,
-      language: selectedLanguage(),
-      source_language: selectedSourceLanguage(),
-      target_language: selectedLanguage(),
-      translation_timing: activeTranslationTiming,
-      tts_engine: selectedEngine(),
-    }),
-  );
+    activeSessionMode === "translator" ? "Instant Translator" : "Virtual Assistant";
+  addSystemMessage(`Starting ${modeLabel}.`);
+  socket.send(JSON.stringify(payload));
 }
 
 async function resumeAudioContextWithTimeout(timeoutMs = 1200) {
   if (!audioContext) {
     return;
   }
-  addSystemMessage(`INFO: Resume AudioContext da state=${audioContext.state}.`);
   try {
-    const result = await Promise.race([
-      audioContext.resume().then(() => "ok"),
+    await Promise.race([
+      audioContext.resume(),
       new Promise((resolve) => {
-        setTimeout(() => resolve("timeout"), timeoutMs);
+        setTimeout(resolve, timeoutMs);
       }),
     ]);
-    addSystemMessage(
-      `INFO: Resume AudioContext result=${result}, state=${audioContext.state}.`,
-    );
   } catch (error) {
-    addSystemMessage(`INFO: Resume AudioContext fallito: ${error.message}.`);
+    addSystemMessage(`Audio resume failed: ${error.message}.`);
+  }
+}
+
+function onRealtimeSocketMessage(event) {
+  if (event.data instanceof ArrayBuffer) {
+    enqueueAudio(event.data);
+    return;
+  }
+  const message = JSON.parse(event.data);
+  switch (message.type) {
+    case "session.ready":
+      ttsSampleRate = message.tts_sample_rate;
+      configureClientBargeIn(message);
+      configureLanguages(message.languages, message.source_languages);
+      configureSessionDefaults(message);
+      configureTtsEngines(message.tts_engines, message.tts_engine);
+      updateEngineStatus(message.tts_engine);
+      sessionShortId = message.session_id.slice(0, 8);
+      updateSessionLabel();
+      break;
+    case "session.started":
+      sessionStarted = true;
+      audioStreamingPaused = false;
+      configureClientBargeIn(message);
+      activeSessionMode = message.mode || selectedMode();
+      activeTranslationTiming = message.translation_timing || translationTimingSelect.value;
+      if (message.tts_sample_rate) {
+        ttsSampleRate = message.tts_sample_rate;
+      }
+      updateEngineStatus(message.tts_engine);
+      updateSessionLabel(message);
+      connectionLabel.textContent = "Online";
+      stopButton.disabled = false;
+      flushPendingMicFrames();
+      setState("listening", "Listening");
+      break;
+    case "tts.engine.loading":
+      audioStreamingPaused = true;
+      setEngineControlsDisabled(true);
+      clearPlayer();
+      updateEngineStatus({
+        engine: message.engine,
+        status: "loading",
+        sample_rate: ttsSampleRate,
+      });
+      connectionLabel.textContent = "Loading TTS";
+      setState("connecting", "Loading voice");
+      break;
+    case "tts.engine.ready":
+      audioStreamingPaused = false;
+      if (message.tts_sample_rate || message.sample_rate) {
+        ttsSampleRate = message.tts_sample_rate || message.sample_rate;
+      }
+      configureTtsEngines(message.tts_engines, message);
+      updateEngineStatus(message);
+      setEngineControlsDisabled(false);
+      if (sessionStarted) {
+        flushPendingMicFrames();
+        connectionLabel.textContent = "Online";
+        setState("listening", "Listening");
+      } else if (pendingSessionStart) {
+        sendSessionStart();
+      }
+      break;
+    case "tts.engine.error":
+      audioStreamingPaused = false;
+      setEngineControlsDisabled(false);
+      configureTtsEngines(message.tts_engines, {
+        engine: message.engine,
+        status: "failed",
+      });
+      updateEngineStatus({
+        engine: message.engine,
+        status: "failed",
+        error: message.message,
+      });
+      addSystemMessage(message.message || "TTS engine is not available.");
+      connectionLabel.textContent = "TTS Error";
+      setState("error", "Error");
+      if (!sessionStarted) {
+        startButton.disabled = false;
+        stopButton.disabled = true;
+      }
+      break;
+    case "audio.meter":
+      updateServerMeter(message.rms);
+      break;
+    case "vad.speech_start":
+      connectionLabel.textContent = "User";
+      setState("user-speaking", "User speaking");
+      break;
+    case "vad.speech_end":
+      connectionLabel.textContent = "STT";
+      setState("transcribing", "Transcribing");
+      break;
+    case "stt.final":
+      currentTurnId = message.turn_id;
+      turnLabel.textContent = String(message.turn_id);
+      sttLatency.textContent = `${message.latency_ms} ms`;
+      if (message.text) {
+        addMessage(
+          activeSessionMode === "translator" ? "source" : "user",
+          activeSessionMode === "translator" ? "Source" : "You",
+          message.text,
+        );
+      }
+      connectionLabel.textContent = "LLM";
+      setState("thinking", "Thinking");
+      break;
+    case "assistant.thinking":
+      prepareAssistantMessage(message.turn_id);
+      setState("thinking", "Thinking");
+      break;
+    case "assistant.text_delta":
+      appendAssistantText(message.turn_id, message.text);
+      break;
+    case "assistant.audio_start":
+      activeAudioTurnId = message.turn_id;
+      if (blockedAudioTurnId === message.turn_id) {
+        audioPlaybackBlocked = true;
+        clearPlayer();
+        break;
+      }
+      audioPlaybackBlocked = false;
+      assistantSpeaking = true;
+      assistantPlaybackActive = false;
+      assistantDonePending = false;
+      bargeSent = false;
+      resetClientVad();
+      connectionLabel.textContent = "TTS";
+      setState("speaking", activeSessionMode === "translator" ? "Speaking" : "Replying");
+      break;
+    case "assistant.audio_ready":
+      ttsLatency.textContent = `${message.latency_ms} ms`;
+      break;
+    case "assistant.done":
+      assistantSpeaking = false;
+      assistantDonePending = true;
+      if (!assistantPlaybackActive && playerBufferedMs === 0) {
+        finishAssistantPlayback();
+      }
+      break;
+    case "turn.cancelled":
+      assistantSpeaking = false;
+      assistantPlaybackActive = false;
+      assistantDonePending = false;
+      activeAudioTurnId = null;
+      resetClientVad();
+      clearPlayer();
+      audioPlaybackBlocked = blockedAudioTurnId === message.turn_id;
+      if (!audioPlaybackBlocked) {
+        blockedAudioTurnId = null;
+      }
+      connectionLabel.textContent = "Interrupted";
+      setState("interrupted", "Interrupted");
+      break;
+    case "turn.empty":
+      connectionLabel.textContent = "Online";
+      setState("listening", "Listening");
+      break;
+    case "error":
+      addSystemMessage(message.message || "Unspecified error.");
+      connectionLabel.textContent = "Error";
+      setState("error", "Error");
+      break;
+    default:
+      break;
+  }
+}
+
+function onEventSocketMessage(event) {
+  if (event.data instanceof ArrayBuffer) {
+    enqueueAudio(event.data);
+    return;
+  }
+  const message = JSON.parse(event.data);
+  switch (message.type) {
+    case "event.speaker.ready":
+    case "event.listener.ready":
+      configureLanguages(message.languages, message.source_languages);
+      configureTtsEngines(message.tts_engines, message.tts_engine);
+      if (message.tts_sample_rate) {
+        ttsSampleRate = message.tts_sample_rate;
+      }
+      updateEngineStatus(message.tts_engine || { engine: selectedEngine(), status: "ready" });
+      break;
+    case "tts.engine.loading":
+      audioStreamingPaused = true;
+      setEngineControlsDisabled(true);
+      updateEngineStatus({
+        engine: message.engine,
+        status: "loading",
+        sample_rate: ttsSampleRate,
+      });
+      connectionLabel.textContent = "Loading TTS";
+      setState("connecting", "Loading voice");
+      break;
+    case "tts.engine.ready":
+      if (message.tts_sample_rate || message.sample_rate) {
+        ttsSampleRate = message.tts_sample_rate || message.sample_rate;
+      }
+      configureTtsEngines(message.tts_engines, message);
+      updateEngineStatus(message);
+      setEngineControlsDisabled(false);
+      break;
+    case "tts.engine.error":
+      addSystemMessage(message.message || "TTS engine is not available.");
+      updateEngineStatus({ engine: message.engine, status: "failed" });
+      setState("error", "Error");
+      break;
+    case "event.host.started":
+      sessionStarted = true;
+      audioStreamingPaused = false;
+      sessionShortId = message.event_code;
+      eventCodeDisplay.textContent = message.event_code;
+      listenerCountLabel.textContent = String(message.listener_count || 0);
+      if (message.tts_sample_rate) {
+        ttsSampleRate = message.tts_sample_rate;
+      }
+      updateEngineStatus(message.tts_engine);
+      updateSessionLabel(message);
+      setEngineControlsDisabled(true);
+      stopButton.disabled = false;
+      flushPendingMicFrames();
+      connectionLabel.textContent = "Hosting";
+      setState("listening", "Ready");
+      break;
+    case "event.listener.joined":
+      sessionStarted = true;
+      audioStreamingPaused = false;
+      sessionShortId = message.event_code;
+      eventCodeDisplay.textContent = message.event_code;
+      listenerCountLabel.textContent = String(message.listener_count || 1);
+      if (message.tts_sample_rate) {
+        ttsSampleRate = message.tts_sample_rate;
+      }
+      updateSessionLabel(message);
+      setEngineControlsDisabled(true);
+      stopButton.disabled = false;
+      connectionLabel.textContent = "Listening";
+      setState("listening", "Listening");
+      audioModeLabel.textContent = `Listening in ${
+        LANGUAGE_LABELS[message.target_language] || message.target_language
+      }`;
+      break;
+    case "event.listener.updated":
+      audioModeLabel.textContent = `Listening in ${
+        LANGUAGE_LABELS[message.target_language] || message.target_language
+      }`;
+      break;
+    case "event.listener_count":
+      listenerCountLabel.textContent = String(message.listener_count || 0);
+      break;
+    case "audio.meter":
+      updateServerMeter(message.rms);
+      break;
+    case "event.speech_start":
+      connectionLabel.textContent = activeEventRole === "speaker" ? "Speaker" : "Live";
+      setState("user-speaking", activeEventRole === "speaker" ? "Speaking" : "Live");
+      break;
+    case "event.speech_end":
+      connectionLabel.textContent = "STT";
+      setState("transcribing", "Transcribing");
+      break;
+    case "event.turn.started":
+      currentTurnId = message.turn_id;
+      turnLabel.textContent = String(message.turn_id);
+      break;
+    case "event.source_text":
+      currentTurnId = message.turn_id;
+      turnLabel.textContent = String(message.turn_id);
+      if (Number.isFinite(message.latency_ms)) {
+        sttLatency.textContent = `${message.latency_ms} ms`;
+      }
+      if (message.text) {
+        addMessage("source", "Speaker", message.text);
+      }
+      connectionLabel.textContent = "Translating";
+      setState("thinking", "Translating");
+      break;
+    case "event.translation.started":
+      prepareEventTranslationMessage(message.turn_id, message.target_language);
+      break;
+    case "event.translation_delta":
+      appendEventTranslationText(
+        message.turn_id,
+        message.target_language,
+        message.text || "",
+      );
+      break;
+    case "event.translation_final":
+      finishEventTranslation(message);
+      break;
+    case "event.audio_start":
+      activeAudioTurnId = message.turn_id;
+      assistantSpeaking = true;
+      assistantPlaybackActive = false;
+      assistantDonePending = false;
+      connectionLabel.textContent = "Audio";
+      setState("speaking", "Playing");
+      break;
+    case "event.audio_ready":
+      if (Number.isFinite(message.latency_ms)) {
+        ttsLatency.textContent = `${message.latency_ms} ms`;
+      }
+      break;
+    case "event.audio_end":
+      assistantDonePending = true;
+      if (!assistantPlaybackActive && playerBufferedMs === 0) {
+        finishAssistantPlayback();
+      }
+      break;
+    case "event.first_audio":
+      if (Number.isFinite(message.latency_ms)) {
+        ttsLatency.textContent = `${message.latency_ms} ms`;
+      }
+      break;
+    case "event.turn.done":
+      if (Number.isFinite(message.latency_ms)) {
+        connectionLabel.textContent = "Online";
+      }
+      setState("listening", activeEventRole === "speaker" ? "Ready" : "Listening");
+      break;
+    case "event.no_listeners":
+      addSystemMessage(message.message || "No listeners are connected.");
+      connectionLabel.textContent = "Waiting";
+      setState("listening", "Ready");
+      break;
+    case "event.turn.empty":
+      connectionLabel.textContent = "Online";
+      setState("listening", activeEventRole === "speaker" ? "Ready" : "Listening");
+      break;
+    case "event.ended":
+      addSystemMessage(`Event ended: ${message.reason || "closed"}.`);
+      cleanup("Event ended");
+      break;
+    case "error":
+      addSystemMessage(message.message || "Unspecified error.");
+      connectionLabel.textContent = "Error";
+      setState("error", "Error");
+      break;
+    default:
+      break;
   }
 }
 
 function updateClientVad(frame) {
+  if (!audioContext || !frame) {
+    return;
+  }
   let sum = 0;
   for (let i = 0; i < frame.length; i += 1) {
     sum += frame[i] * frame[i];
@@ -572,7 +1100,7 @@ function updateClientVad(frame) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "barge_in" }));
     }
-    setState("interrupted", "Interrotto");
+    setState("interrupted", "Interrupted");
   }
 }
 
@@ -588,11 +1116,9 @@ function blockAssistantAudioPlayback(rms) {
   clearPlayer();
   bufferLabel.textContent = "0 ms";
   sendBargeIn();
-  addSystemMessage(
-    `INFO: Barge-in locale rms=${rms.toFixed(4)} soglia=${clientVad.threshold}.`,
-  );
-  connectionLabel.textContent = "Interrotto";
-  setState("interrupted", "Interrotto");
+  addSystemMessage("Playback interrupted.");
+  connectionLabel.textContent = "Interrupted";
+  setState("interrupted", "Interrupted");
 }
 
 function resetClientVad() {
@@ -641,361 +1167,15 @@ function finishAssistantPlayback() {
   activeAudioTurnId = null;
   blockedAudioTurnId = null;
   resetClientVad();
-  connectionLabel.textContent = "Online";
-  setState("listening", "Ascolto");
-}
-
-function onSocketMessage(event) {
-  if (event.data instanceof ArrayBuffer) {
-    enqueueAudio(event.data);
-    return;
-  }
-
-  const message = JSON.parse(event.data);
-  switch (message.type) {
-    case "session.ready":
-      ttsSampleRate = message.tts_sample_rate;
-      configureClientBargeIn(message);
-      configureLanguages(message.languages, message.source_languages);
-      configureSessionDefaults(message);
-      configureTtsEngines(message.tts_engines, message.tts_engine);
-      updateEngineStatus(message.tts_engine);
-      sessionShortId = message.session_id.slice(0, 8);
-      updateSessionLabel({
-        mode: selectedMode(),
-        language: message.language || selectedLanguage(),
-        sourceLanguage: selectedSourceLanguage(),
-        targetLanguage: selectedLanguage(),
-        translationTiming: selectedTranslationTiming(),
-      });
-      break;
-    case "session.started":
-      sessionStarted = true;
-      audioStreamingPaused = false;
-      configureClientBargeIn(message);
-      activeSessionMode = message.mode || selectedMode();
-      activeTranslationTiming = message.translation_timing || selectedTranslationTiming();
-      if (message.language) {
-        updateSessionLabel({
-          mode: activeSessionMode,
-          language: message.language,
-          sourceLanguage: message.source_language || selectedSourceLanguage(),
-          targetLanguage: message.target_language || message.language,
-          translationTiming: activeTranslationTiming,
-        });
-      }
-      if (message.tts_sample_rate) {
-        ttsSampleRate = message.tts_sample_rate;
-      }
-      updateEngineStatus(message.tts_engine);
-      connectionLabel.textContent = "Online";
-      ttsEngineSelect.disabled = false;
-      stopButton.disabled = false;
-      flushPendingMicFrames();
-      setState("listening", "Ascolto");
-      break;
-    case "tts.engine.loading":
-      audioStreamingPaused = true;
-      ttsEngineSelect.disabled = true;
-      clearPlayer();
-      updateEngineStatus({
-        engine: message.engine,
-        status: "loading",
-        sample_rate: ttsSampleRate,
-      });
-      connectionLabel.textContent = "Carico TTS";
-      setState("connecting", "Carico voce");
-      break;
-    case "tts.engine.ready":
-      audioStreamingPaused = false;
-      if (message.tts_sample_rate || message.sample_rate) {
-        ttsSampleRate = message.tts_sample_rate || message.sample_rate;
-      }
-      configureTtsEngines(message.tts_engines, message);
-      updateEngineStatus(message);
-      ttsEngineSelect.disabled = false;
-      if (sessionStarted) {
-        flushPendingMicFrames();
-        connectionLabel.textContent = "Online";
-        setState("listening", "Ascolto");
-      } else if (pendingSessionStart) {
-        sendSessionStart();
-      }
-      break;
-    case "tts.engine.error":
-      audioStreamingPaused = false;
-      ttsEngineSelect.disabled = false;
-      configureTtsEngines(message.tts_engines, {
-        engine: message.engine,
-        status: "failed",
-      });
-      updateEngineStatus({
-        engine: message.engine,
-        status: "failed",
-        error: message.message,
-      });
-      addSystemMessage(message.message || "Engine TTS non disponibile.");
-      connectionLabel.textContent = "Errore TTS";
-      setState("error", "Errore");
-      if (!sessionStarted) {
-        startButton.disabled = false;
-        languageSelect.disabled = false;
-        stopButton.disabled = true;
-      }
-      break;
-    case "audio.meter":
-      updateServerMeter(message.rms);
-      break;
-    case "vad.speech_start":
-      connectionLabel.textContent = "Utente";
-      setState("user-speaking", "Utente parla");
-      break;
-    case "vad.speech_end":
-      connectionLabel.textContent = "STT";
-      setState("transcribing", "Trascrivo");
-      break;
-    case "stt.final":
-      currentTurnId = message.turn_id;
-      turnLabel.textContent = String(message.turn_id);
-      sttLatency.textContent = `${message.latency_ms} ms`;
-      if (message.text) {
-        addMessage("user", "Utente", message.text);
-      }
-      connectionLabel.textContent = "LLM";
-      setState("thinking", "Elaboro");
-      break;
-    case "assistant.thinking":
-      prepareAssistantMessage(message.turn_id);
-      setState("thinking", "Elaboro");
-      break;
-    case "assistant.text_delta":
-      appendAssistantText(message.turn_id, message.text);
-      break;
-    case "assistant.audio_start":
-      activeAudioTurnId = message.turn_id;
-      if (blockedAudioTurnId === message.turn_id) {
-        audioPlaybackBlocked = true;
-        clearPlayer();
-        break;
-      }
-      audioPlaybackBlocked = false;
-      assistantSpeaking = true;
-      assistantPlaybackActive = false;
-      assistantDonePending = false;
-      bargeSent = false;
-      resetClientVad();
-      connectionLabel.textContent = "TTS";
-      setState("speaking", "Rispondo");
-      break;
-    case "assistant.audio_ready":
-      ttsLatency.textContent = `${message.latency_ms} ms`;
-      break;
-    case "assistant.done":
-      assistantSpeaking = false;
-      assistantDonePending = true;
-      if (!assistantPlaybackActive && playerBufferedMs === 0) {
-        finishAssistantPlayback();
-      }
-      break;
-    case "turn.cancelled":
-      assistantSpeaking = false;
-      assistantPlaybackActive = false;
-      assistantDonePending = false;
-      activeAudioTurnId = null;
-      resetClientVad();
-      clearPlayer();
-      audioPlaybackBlocked = blockedAudioTurnId === message.turn_id;
-      if (!audioPlaybackBlocked) {
-        blockedAudioTurnId = null;
-      }
-      connectionLabel.textContent = "Interrotto";
-      setState("interrupted", "Interrotto");
-      break;
-    case "turn.empty":
-      connectionLabel.textContent = "Online";
-      setState("listening", "Ascolto");
-      break;
-    case "error":
-      addSystemMessage(message.message || "Errore non specificato.");
-      connectionLabel.textContent = "Errore";
-      setState("error", "Errore");
-      break;
-    default:
-      break;
-  }
-}
-
-function selectedLanguage() {
-  return languageSelect ? languageSelect.value : "it";
-}
-
-function selectedSourceLanguage() {
-  return sourceLanguageSelect ? sourceLanguageSelect.value : "auto";
-}
-
-function selectedMode() {
-  return sessionModeSelect ? sessionModeSelect.value : "agent";
-}
-
-function selectedTranslationTiming() {
-  return translationTimingSelect ? translationTimingSelect.value : "immediate";
-}
-
-function selectedEngine() {
-  return ttsEngineSelect ? ttsEngineSelect.value : "omnivoice";
-}
-
-function updateSessionLabel(options) {
-  const language = typeof options === "string" ? options : options.language;
-  const mode = typeof options === "string" ? selectedMode() : options.mode;
-  const sourceLanguage =
-    typeof options === "string" ? selectedSourceLanguage() : options.sourceLanguage;
-  const targetLanguage =
-    typeof options === "string" ? language : options.targetLanguage || language;
-  const timing =
-    typeof options === "string" ? selectedTranslationTiming() : options.translationTiming;
-  const label = LANGUAGE_LABELS[language] || language || "Italiano";
-  const targetLabel = LANGUAGE_LABELS[targetLanguage] || targetLanguage || label;
-  const sourceLabel =
-    SOURCE_LANGUAGE_LABELS[sourceLanguage] || sourceLanguage || "Auto rilevamento";
-  const modeLabel =
-    mode === "translator"
-      ? `Traduttore ${sourceLabel} -> ${targetLabel}${
-          timing === "immediate" ? " · parla subito" : " · fine parlato"
-        }`
-      : `Agente · ${label}`;
-  if (sessionShortId) {
-    sessionLabel.textContent = `Sessione ${sessionShortId} · ${modeLabel}`;
+  if (activeProtocol === "event_listener") {
+    connectionLabel.textContent = "Listening";
+    setState("listening", "Listening");
+  } else if (activeProtocol === "event_speaker") {
+    connectionLabel.textContent = "Hosting";
+    setState("listening", "Ready");
   } else {
-    sessionLabel.textContent = `Sessione ${modeLabel}`;
-  }
-}
-
-function configureLanguages(languages, sourceLanguages) {
-  if (languages && typeof languages === "object") {
-    Object.assign(LANGUAGE_LABELS, languages);
-    populateSelect(languageSelect, languages, selectedLanguage());
-  }
-  if (sourceLanguages && typeof sourceLanguages === "object") {
-    Object.assign(SOURCE_LANGUAGE_LABELS, sourceLanguages);
-    populateSelect(sourceLanguageSelect, sourceLanguages, selectedSourceLanguage());
-  } else if (languages && typeof languages === "object") {
-    populateSelect(
-      sourceLanguageSelect,
-      { auto: SOURCE_LANGUAGE_LABELS.auto, ...languages },
-      selectedSourceLanguage(),
-    );
-  }
-}
-
-function populateSelect(select, options, selected) {
-  if (!select || !options || typeof options !== "object") {
-    return;
-  }
-  const fallback = selected || select.value;
-  select.innerHTML = "";
-  for (const [value, label] of Object.entries(options)) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    select.appendChild(option);
-  }
-  if ([...select.options].some((option) => option.value === fallback)) {
-    select.value = fallback;
-  }
-}
-
-function configureSessionDefaults(message) {
-  if (pendingSessionStart || sessionStarted) {
-    if (Number.isFinite(message.translator_immediate_buffer_ms)) {
-      translatorImmediateBufferMs = message.translator_immediate_buffer_ms;
-    }
-    updateModeControls();
-    return;
-  }
-  if (message.mode && sessionModeSelect) {
-    sessionModeSelect.value = message.mode;
-  }
-  if (message.translation_timing && translationTimingSelect) {
-    translationTimingSelect.value = message.translation_timing;
-  }
-  if (message.source_language && sourceLanguageSelect) {
-    sourceLanguageSelect.value = message.source_language;
-  }
-  if (message.target_language && languageSelect) {
-    languageSelect.value = message.target_language;
-  } else if (message.language && languageSelect) {
-    languageSelect.value = message.language;
-  }
-  if (Number.isFinite(message.translator_immediate_buffer_ms)) {
-    translatorImmediateBufferMs = message.translator_immediate_buffer_ms;
-  }
-  updateModeControls();
-}
-
-function updateModeControls() {
-  const translator = selectedMode() === "translator";
-  sourceLanguageControl.classList.toggle("hidden", !translator);
-  translationTimingControl.classList.toggle("hidden", !translator);
-  languageSelectLabel.textContent = translator ? "A" : "Lingua agente";
-  if (translator && selectedTranslationTiming() === "immediate") {
-    audioModeLabel.textContent = `Traduttore: buffer ${translatorImmediateBufferMs} ms`;
-  } else if (!sessionStarted) {
-    audioModeLabel.textContent = "Audio in attesa";
-  }
-}
-
-function switchToTranslatorFromLanguageControl() {
-  if (sessionStarted || pendingSessionStart || selectedMode() === "translator") {
-    updateModeControls();
-    return;
-  }
-  sessionModeSelect.value = "translator";
-  updateModeControls();
-}
-
-function configureTtsEngines(engines, activeStatus) {
-  if (!ttsEngineSelect || !Array.isArray(engines) || engines.length === 0) {
-    return;
-  }
-  const selected = activeStatus && activeStatus.engine ? activeStatus.engine : selectedEngine();
-  ttsEngineSelect.innerHTML = "";
-  for (const engine of engines) {
-    const option = document.createElement("option");
-    option.value = engine.id;
-    option.textContent = engine.label || ENGINE_LABELS[engine.id] || engine.id;
-    ttsEngineSelect.appendChild(option);
-  }
-  if ([...ttsEngineSelect.options].some((option) => option.value === selected)) {
-    ttsEngineSelect.value = selected;
-  }
-}
-
-function updateEngineStatus(status) {
-  if (!status) {
-    return;
-  }
-  const engine = status.engine || selectedEngine();
-  const label = ENGINE_LABELS[engine] || engine || "TTS";
-  if (ttsEngineSelect && ttsEngineSelect.value !== engine) {
-    const exists = [...ttsEngineSelect.options].some((option) => option.value === engine);
-    if (exists) {
-      ttsEngineSelect.value = engine;
-    }
-  }
-
-  const state = status.status || "ready";
-  const sampleRate = status.sample_rate || status.tts_sample_rate || ttsSampleRate;
-  if (state === "ready") {
-    voiceModeLabel.textContent = `${label} pronto · ${sampleRate} Hz`;
-  } else if (state === "loading") {
-    voiceModeLabel.textContent = `${label} in caricamento`;
-  } else if (state === "failed") {
-    voiceModeLabel.textContent = `${label} errore`;
-  } else if (state === "selected") {
-    voiceModeLabel.textContent = `${label} selezionato`;
-  } else {
-    voiceModeLabel.textContent = `${label} · ${state}`;
+    connectionLabel.textContent = "Online";
+    setState("listening", "Listening");
   }
 }
 
@@ -1011,24 +1191,6 @@ function enqueueAudio(arrayBuffer) {
   }
   const resampled = resampleLinear(floats, ttsSampleRate, audioContext.sampleRate);
   enqueuePlayerSamples(resampled);
-}
-
-function configureClientBargeIn(message) {
-  if (typeof message.client_barge_enabled === "boolean") {
-    clientBargeEnabled = message.client_barge_enabled;
-  }
-  if (Number.isFinite(message.client_barge_threshold)) {
-    clientVad.threshold = message.client_barge_threshold;
-  }
-  if (Number.isFinite(message.client_barge_stop_ms)) {
-    clientVad.stopMs = message.client_barge_stop_ms;
-  }
-  if (Number.isFinite(message.client_barge_commit_ms)) {
-    clientVad.commitMs = message.client_barge_commit_ms;
-  }
-  if (Number.isFinite(message.client_barge_cooldown_ms)) {
-    clientVad.cooldownMs = message.client_barge_cooldown_ms;
-  }
 }
 
 function clearPlayer() {
@@ -1050,7 +1212,6 @@ function enqueuePlayerSamples(samples) {
     );
     return;
   }
-
   fallbackPlayerQueue.push(samples);
   fallbackQueuedSamples += samples.length;
   updateFallbackBufferLabel();
@@ -1063,18 +1224,15 @@ function onFallbackPlayerProcess(event) {
       output[i] = 0;
       continue;
     }
-
     const head = fallbackPlayerQueue[0];
     output[i] = head[fallbackPlayerOffset] || 0;
     fallbackPlayerOffset += 1;
     fallbackQueuedSamples = Math.max(0, fallbackQueuedSamples - 1);
-
     if (fallbackPlayerOffset >= head.length) {
       fallbackPlayerQueue.shift();
       fallbackPlayerOffset = 0;
     }
   }
-
   const now = performance.now();
   if (now - fallbackBufferLastAt > 100) {
     fallbackBufferLastAt = now;
@@ -1113,7 +1271,11 @@ function prepareAssistantMessage(turnId) {
   if (activeAssistantMessage && activeAssistantMessage.dataset.turnId === String(turnId)) {
     return;
   }
-  activeAssistantMessage = addMessage("assistant", "Assistente", "");
+  activeAssistantMessage = addMessage(
+    "assistant",
+    activeSessionMode === "translator" ? "Translation" : "Assistant",
+    "",
+  );
   activeAssistantMessage.dataset.turnId = String(turnId);
 }
 
@@ -1124,16 +1286,56 @@ function appendAssistantText(turnId, text) {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
+function eventMessageKey(turnId, targetLanguage) {
+  return `${turnId || "turn"}:${targetLanguage || "target"}`;
+}
+
+function prepareEventTranslationMessage(turnId, targetLanguage) {
+  const key = eventMessageKey(turnId, targetLanguage);
+  if (activeEventMessages.has(key)) {
+    return activeEventMessages.get(key);
+  }
+  const label = LANGUAGE_LABELS[targetLanguage] || targetLanguage || "Target";
+  const node = addMessage("assistant", `Translation · ${label}`, "");
+  node.dataset.turnId = String(turnId || "");
+  node.dataset.targetLanguage = targetLanguage || "";
+  activeEventMessages.set(key, node);
+  return node;
+}
+
+function appendEventTranslationText(turnId, targetLanguage, text) {
+  const node = prepareEventTranslationMessage(turnId, targetLanguage);
+  node.querySelector(".messageText").textContent += text;
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+function finishEventTranslation(message) {
+  const key = eventMessageKey(message.turn_id, message.target_language);
+  const node = activeEventMessages.get(key);
+  if (node) {
+    const body = node.querySelector(".messageText");
+    if (!body.textContent.trim()) {
+      body.textContent = message.text || "";
+    }
+    return;
+  }
+  const label = LANGUAGE_LABELS[message.target_language] || message.target_language;
+  addMessage("assistant", `Translation · ${label}`, message.text || "");
+}
+
 function addMessage(role, title, text) {
   const node = document.createElement("article");
   node.className = `message ${role}`;
   node.innerHTML = `
     <div class="messageHead">
-      <span>${title}</span>
-      <span>${new Date().toLocaleTimeString()}</span>
+      <span></span>
+      <span></span>
     </div>
     <div class="messageText"></div>
   `;
+  const head = node.querySelectorAll(".messageHead span");
+  head[0].textContent = title;
+  head[1].textContent = new Date().toLocaleTimeString();
   node.querySelector(".messageText").textContent = text;
   conversation.appendChild(node);
   conversation.scrollTop = conversation.scrollHeight;
@@ -1141,7 +1343,299 @@ function addMessage(role, title, text) {
 }
 
 function addSystemMessage(text) {
-  addMessage("system", "Sistema", text);
+  addMessage("system", "System", text);
+}
+
+function switchRoom(room) {
+  if (!room || room === activeRoom || sessionStarted || pendingSessionStart) {
+    return;
+  }
+  activeRoom = room;
+  for (const tab of roomTabs) {
+    tab.classList.toggle("active", tab.dataset.room === room);
+  }
+  for (const [name, panel] of Object.entries(roomPanels)) {
+    panel.classList.toggle("active", name === room);
+  }
+  timelineTitle.textContent = ROOM_TITLES[room];
+  roomBadge.textContent = room === "event" ? "Event" : room === "translator" ? "Translator" : "Assistant";
+  activeAssistantMessage = null;
+  activeEventMessages = new Map();
+  updateRoomControls();
+  updateSessionLabel();
+}
+
+function switchEventRole(role) {
+  if (!role || role === activeEventRole || sessionStarted || pendingSessionStart) {
+    return;
+  }
+  activeEventRole = role;
+  eventSpeakerRoleButton.classList.toggle("active", role === "speaker");
+  eventListenerRoleButton.classList.toggle("active", role === "listener");
+  eventSpeakerPanel.classList.toggle("active", role === "speaker");
+  eventListenerPanel.classList.toggle("active", role === "listener");
+  eventCodeDisplay.textContent = role === "speaker" ? "Not hosted" : "-";
+  updateRoomControls();
+}
+
+function updateRoomControls() {
+  const promptCustom = assistantPromptModeSelect.value === "custom";
+  customPromptWrap.classList.toggle("hidden", !promptCustom);
+  if (activeRoom === "assistant") {
+    startButton.textContent = "Start assistant";
+    audioModeLabel.textContent = sessionStarted ? audioModeLabel.textContent : "Audio idle";
+  } else if (activeRoom === "translator") {
+    startButton.textContent = "Start translator";
+    if (!sessionStarted && translationTimingSelect.value === "immediate") {
+      audioModeLabel.textContent = `Translator buffer ${translatorImmediateBufferMs} ms`;
+    }
+  } else if (activeEventRole === "speaker") {
+    startButton.textContent = "Host event";
+    if (!sessionStarted) {
+      audioModeLabel.textContent = "Speaker audio idle";
+    }
+  } else {
+    startButton.textContent = "Join event";
+    if (!sessionStarted) {
+      audioModeLabel.textContent = "Listener audio idle";
+    }
+  }
+  updateSessionLabel();
+}
+
+function setControlsDisabled(disabled) {
+  for (const tab of roomTabs) {
+    tab.disabled = disabled;
+  }
+  for (const button of [eventSpeakerRoleButton, eventListenerRoleButton]) {
+    button.disabled = disabled;
+  }
+  for (const control of [
+    languageSelect,
+    assistantPromptModeSelect,
+    customPromptInput,
+    ttsEngineSelect,
+    sourceLanguageSelect,
+    translatorTargetLanguageSelect,
+    translationTimingSelect,
+    translatorTtsEngineSelect,
+    eventSourceLanguageSelect,
+    eventTargetLanguageSelect,
+    eventTtsEngineSelect,
+    eventCodeInput,
+  ]) {
+    control.disabled = disabled;
+  }
+}
+
+function setEngineControlsDisabled(disabled) {
+  const shouldDisable = disabled || (sessionStarted && activeRoom === "event");
+  for (const select of engineSelects) {
+    select.disabled = shouldDisable;
+  }
+}
+
+function selectedMode() {
+  return activeRoom === "translator" ? "translator" : "agent";
+}
+
+function selectedLanguage() {
+  return activeRoom === "translator"
+    ? translatorTargetLanguageSelect.value
+    : languageSelect.value;
+}
+
+function selectedEngine() {
+  if (activeRoom === "translator") {
+    return translatorTtsEngineSelect.value;
+  }
+  if (activeRoom === "event") {
+    return eventTtsEngineSelect.value;
+  }
+  return ttsEngineSelect.value;
+}
+
+function updateSessionLabel(message = {}) {
+  if (activeRoom === "event") {
+    const code = message.event_code || sessionShortId;
+    if (activeEventRole === "speaker") {
+      sessionLabel.textContent = code
+        ? `Event ${code} · Speaker`
+        : "Event speaker setup";
+    } else {
+      const language = message.target_language || eventTargetLanguageSelect.value;
+      sessionLabel.textContent = code
+        ? `Event ${code} · Listening in ${LANGUAGE_LABELS[language] || language}`
+        : "Event listener setup";
+    }
+    return;
+  }
+
+  const language = message.language || selectedLanguage();
+  const targetLanguage = message.target_language || selectedLanguage();
+  const sourceLanguage = message.source_language || sourceLanguageSelect.value;
+  const timing = message.translation_timing || translationTimingSelect.value;
+  if (activeRoom === "translator") {
+    const sourceLabel = SOURCE_LANGUAGE_LABELS[sourceLanguage] || sourceLanguage;
+    const targetLabel = LANGUAGE_LABELS[targetLanguage] || targetLanguage;
+    const timingLabel = timing === "immediate" ? "speak immediately" : "end of speech";
+    sessionLabel.textContent = sessionShortId
+      ? `Session ${sessionShortId} · ${sourceLabel} to ${targetLabel} · ${timingLabel}`
+      : `${sourceLabel} to ${targetLabel} · ${timingLabel}`;
+    return;
+  }
+  const label = LANGUAGE_LABELS[language] || language;
+  const promptLabel =
+    assistantPromptModeSelect.value === "custom" ? "custom prompt" : "CavadaLabs prompt";
+  sessionLabel.textContent = sessionShortId
+    ? `Session ${sessionShortId} · ${label} · ${promptLabel}`
+    : `${label} · ${promptLabel}`;
+}
+
+function configureLanguages(languages, sourceLanguages) {
+  if (languages && typeof languages === "object") {
+    const targetOptions = {};
+    for (const [value, label] of Object.entries(languages)) {
+      targetOptions[value] = LANGUAGE_LABELS[value] || label;
+    }
+    for (const select of targetLanguageSelects) {
+      populateSelect(select, targetOptions, select.value);
+    }
+  }
+  const sourceOptions = {};
+  const sourceCatalog =
+    sourceLanguages && typeof sourceLanguages === "object"
+      ? sourceLanguages
+      : { auto: "Auto-detect", ...(languages || LANGUAGE_LABELS) };
+  for (const [value, label] of Object.entries(sourceCatalog)) {
+    sourceOptions[value] = SOURCE_LANGUAGE_LABELS[value] || LANGUAGE_LABELS[value] || label;
+  }
+  for (const select of sourceLanguageSelects) {
+    populateSelect(select, sourceOptions, select.value);
+  }
+}
+
+function populateSelect(select, options, selected) {
+  if (!select || !options || typeof options !== "object") {
+    return;
+  }
+  const fallback = selected || select.value;
+  select.innerHTML = "";
+  for (const [value, label] of Object.entries(options)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+  if ([...select.options].some((option) => option.value === fallback)) {
+    select.value = fallback;
+  }
+}
+
+function configureSessionDefaults(message) {
+  if (pendingSessionStart || sessionStarted) {
+    if (Number.isFinite(message.translator_immediate_buffer_ms)) {
+      translatorImmediateBufferMs = message.translator_immediate_buffer_ms;
+    }
+    updateRoomControls();
+    return;
+  }
+  if (message.translation_timing) {
+    translationTimingSelect.value = message.translation_timing;
+  }
+  if (message.source_language) {
+    sourceLanguageSelect.value = message.source_language;
+  }
+  if (message.target_language) {
+    translatorTargetLanguageSelect.value = message.target_language;
+  } else if (message.language) {
+    languageSelect.value = message.language;
+  }
+  if (Number.isFinite(message.translator_immediate_buffer_ms)) {
+    translatorImmediateBufferMs = message.translator_immediate_buffer_ms;
+  }
+  updateRoomControls();
+}
+
+function configureTtsEngines(engines, activeStatus) {
+  if (!Array.isArray(engines) || engines.length === 0) {
+    return;
+  }
+  const selected = activeStatus && activeStatus.engine ? activeStatus.engine : selectedEngine();
+  for (const select of engineSelects) {
+    const previous = select.value || selected;
+    select.innerHTML = "";
+    for (const engine of engines) {
+      const option = document.createElement("option");
+      option.value = engine.id;
+      option.textContent = engine.label || ENGINE_LABELS[engine.id] || engine.id;
+      select.appendChild(option);
+    }
+    const wanted = [...select.options].some((option) => option.value === previous)
+      ? previous
+      : selected;
+    if ([...select.options].some((option) => option.value === wanted)) {
+      select.value = wanted;
+    }
+  }
+}
+
+function updateEngineStatus(status) {
+  if (!status) {
+    return;
+  }
+  const engine = status.engine || selectedEngine();
+  const label = ENGINE_LABELS[engine] || engine || "TTS";
+  const state = status.status || "ready";
+  const sampleRate = status.sample_rate || status.tts_sample_rate || ttsSampleRate;
+  if (state === "ready") {
+    voiceModeLabel.textContent = `${label} ready · ${sampleRate} Hz`;
+  } else if (state === "loading" || state === "connecting") {
+    voiceModeLabel.textContent = `${label} loading`;
+  } else if (state === "failed") {
+    voiceModeLabel.textContent = `${label} error`;
+  } else if (state === "selected") {
+    voiceModeLabel.textContent = `${label} selected`;
+  } else {
+    voiceModeLabel.textContent = `${label} · ${state}`;
+  }
+}
+
+function configureClientBargeIn(message) {
+  if (typeof message.client_barge_enabled === "boolean") {
+    clientBargeEnabled = message.client_barge_enabled;
+  }
+  if (Number.isFinite(message.client_barge_threshold)) {
+    clientVad.threshold = message.client_barge_threshold;
+  }
+  if (Number.isFinite(message.client_barge_stop_ms)) {
+    clientVad.stopMs = message.client_barge_stop_ms;
+  }
+  if (Number.isFinite(message.client_barge_commit_ms)) {
+    clientVad.commitMs = message.client_barge_commit_ms;
+  }
+  if (Number.isFinite(message.client_barge_cooldown_ms)) {
+    clientVad.cooldownMs = message.client_barge_cooldown_ms;
+  }
+}
+
+function onEventTargetLanguageChange() {
+  if (
+    activeProtocol !== "event_listener" ||
+    !sessionStarted ||
+    !socket ||
+    socket.readyState !== WebSocket.OPEN
+  ) {
+    updateRoomControls();
+    return;
+  }
+  socket.send(
+    JSON.stringify({
+      type: "event.listener.update_language",
+      target_language: eventTargetLanguageSelect.value,
+    }),
+  );
+  updateRoomControls();
 }
 
 function setState(className, label) {
@@ -1179,4 +1673,11 @@ function updateServerMeter(rms) {
   }
   const level = Math.min(100, Math.round((rms / 0.08) * 100));
   meterFill.style.width = `${level}%`;
+}
+
+function normalizeEventCode(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 12);
 }

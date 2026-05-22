@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,100 +12,250 @@
         <div class="brandRow">
           <div class="productMark">OV</div>
           <div>
-            <h1>CavadaLabs Voice Desk</h1>
-            <p id="sessionLabel">Sessione non avviata</p>
+            <h1>OmniVoice Live</h1>
+            <p id="sessionLabel">No session running</p>
           </div>
         </div>
-        <div class="topControls">
-          <div class="callMeta">
-            <span id="transportLabel" class="statusBadge">HTTPS/WSS</span>
-            <span id="timerLabel" class="timer">00:00</span>
+        <div class="callMeta">
+          <span id="transportLabel" class="statusBadge">HTTPS/WSS</span>
+          <span id="timerLabel" class="timer">00:00</span>
+          <span id="connectionLabel" class="connectionPill">Offline</span>
+        </div>
+      </section>
+
+      <nav class="roomSwitcher" aria-label="Rooms">
+        <button class="roomTab active" data-room="assistant" type="button">
+          Virtual Assistant
+        </button>
+        <button class="roomTab" data-room="translator" type="button">
+          Instant Translator
+        </button>
+        <button class="roomTab" data-room="event" type="button">
+          Event Interpreter
+        </button>
+      </nav>
+
+      <section class="controlBand">
+        <div class="roomPanel active" id="assistantRoom">
+          <div class="controlGrid assistantGrid">
+            <label class="field">
+              <span>Assistant Language</span>
+              <select id="languageSelect">
+                <option value="en" selected>English</option>
+                <option value="it">Italian</option>
+                <option value="de">German</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="pt">Portuguese</option>
+                <option value="ro">Romanian</option>
+                <option value="sq">Albanian</option>
+                <option value="ru">Russian</option>
+                <option value="uk">Ukrainian</option>
+                <option value="pl">Polish</option>
+                <option value="sr">Serbian/Croatian/Bosnian</option>
+                <option value="hr">Croatian</option>
+                <option value="bs">Bosnian</option>
+                <option value="ar">Arabic</option>
+                <option value="zh">Simplified Chinese</option>
+                <option value="hi">Hindi</option>
+                <option value="ur">Urdu</option>
+                <option value="sw">Swahili</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Prompt</span>
+              <select id="assistantPromptModeSelect">
+                <option value="default" selected>CavadaLabs default</option>
+                <option value="custom">Custom prompt</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>TTS Engine</span>
+              <select id="ttsEngineSelect">
+                <option value="omnivoice" selected>OmniVoice</option>
+                <option value="qwen3_tts">Qwen3-TTS</option>
+              </select>
+            </label>
           </div>
-          <label class="languageControl modeControl">
-            <span>Modalità</span>
-            <select id="sessionModeSelect">
-              <option value="agent" selected>Agente CavadaLabs</option>
-              <option value="translator">Traduttore live</option>
-            </select>
+          <label class="field promptField hidden" id="customPromptWrap">
+            <span>Custom Assistant Prompt</span>
+            <textarea
+              id="customPromptInput"
+              rows="5"
+              placeholder="Define the assistant role, boundaries, tone, and business context."
+            ></textarea>
           </label>
-          <label class="languageControl sourceLanguageControl hidden" id="sourceLanguageControl">
-            <span>Da</span>
-            <select id="sourceLanguageSelect">
-              <option value="auto" selected>Auto rilevamento</option>
-              <option value="it">Italiano</option>
-              <option value="en">English</option>
-              <option value="de">Tedesco (Deutsch)</option>
-              <option value="fr">Francese (Français)</option>
-              <option value="es">Spagnolo (Español)</option>
-              <option value="pt">Portoghese (Português)</option>
-              <option value="ro">Rumeno (Română)</option>
-              <option value="sq">Albanese (Shqip)</option>
-              <option value="ru">Russo (Русский)</option>
-              <option value="uk">Ucraino (Українська)</option>
-              <option value="pl">Polski</option>
-              <option value="sr">Serbo/Croato/Bosniaco</option>
-              <option value="hr">Croato (Hrvatski)</option>
-              <option value="bs">Bosniaco (Bosanski)</option>
-              <option value="ar">Arabo (العربية)</option>
-              <option value="zh">Cinese semplificato (简体中文)</option>
-              <option value="hi">Hindi (हिन्दी)</option>
-              <option value="ur">Urdu (اردو)</option>
-              <option value="sw">Swahili (Kiswahili)</option>
-            </select>
-          </label>
-          <label class="languageControl">
-            <span id="languageSelectLabel">Lingua agente</span>
-            <select id="languageSelect">
-              <option value="it" selected>Italiano</option>
-              <option value="en">English</option>
-              <option value="de">Tedesco (Deutsch)</option>
-              <option value="fr">Francese (Français)</option>
-              <option value="es">Spagnolo (Español)</option>
-              <option value="pt">Portoghese (Português)</option>
-              <option value="ro">Rumeno (Română)</option>
-              <option value="sq">Albanese (Shqip)</option>
-              <option value="ru">Russo (Русский)</option>
-              <option value="uk">Ucraino (Українська)</option>
-              <option value="pl">Polski</option>
-              <option value="sr">Serbo/Croato/Bosniaco</option>
-              <option value="hr">Croato (Hrvatski)</option>
-              <option value="bs">Bosniaco (Bosanski)</option>
-              <option value="ar">Arabo (العربية)</option>
-              <option value="zh">Cinese semplificato (简体中文)</option>
-              <option value="hi">Hindi (हिन्दी)</option>
-              <option value="ur">Urdu (اردو)</option>
-              <option value="sw">Swahili (Kiswahili)</option>
-            </select>
-          </label>
-          <label class="languageControl timingControl hidden" id="translationTimingControl">
-            <span>Timing</span>
-            <select id="translationTimingSelect">
-              <option value="immediate" selected>Parla subito</option>
-              <option value="end_of_speech">Fine parlato</option>
-            </select>
-          </label>
-          <label class="languageControl engineControl">
-            <span>Engine TTS</span>
-            <select id="ttsEngineSelect">
-              <option value="omnivoice" selected>OmniVoice</option>
-              <option value="qwen3_tts">Qwen3-TTS</option>
-            </select>
-          </label>
-          <div class="actions">
-            <button id="startButton" class="primary">Avvia chiamata</button>
-            <button id="stopButton" disabled>Termina</button>
+        </div>
+
+        <div class="roomPanel" id="translatorRoom">
+          <div class="controlGrid translatorGrid">
+            <label class="field">
+              <span>Source Language</span>
+              <select id="sourceLanguageSelect">
+                <option value="auto" selected>Auto-detect</option>
+                <option value="it">Italian</option>
+                <option value="en">English</option>
+                <option value="de">German</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="pt">Portuguese</option>
+                <option value="ro">Romanian</option>
+                <option value="sq">Albanian</option>
+                <option value="ru">Russian</option>
+                <option value="uk">Ukrainian</option>
+                <option value="pl">Polish</option>
+                <option value="sr">Serbian/Croatian/Bosnian</option>
+                <option value="hr">Croatian</option>
+                <option value="bs">Bosnian</option>
+                <option value="ar">Arabic</option>
+                <option value="zh">Simplified Chinese</option>
+                <option value="hi">Hindi</option>
+                <option value="ur">Urdu</option>
+                <option value="sw">Swahili</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Target Language</span>
+              <select id="translatorTargetLanguageSelect">
+                <option value="en" selected>English</option>
+                <option value="it">Italian</option>
+                <option value="de">German</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="pt">Portuguese</option>
+                <option value="ro">Romanian</option>
+                <option value="sq">Albanian</option>
+                <option value="ru">Russian</option>
+                <option value="uk">Ukrainian</option>
+                <option value="pl">Polish</option>
+                <option value="sr">Serbian/Croatian/Bosnian</option>
+                <option value="hr">Croatian</option>
+                <option value="bs">Bosnian</option>
+                <option value="ar">Arabic</option>
+                <option value="zh">Simplified Chinese</option>
+                <option value="hi">Hindi</option>
+                <option value="ur">Urdu</option>
+                <option value="sw">Swahili</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Timing Mode</span>
+              <select id="translationTimingSelect">
+                <option value="immediate" selected>Speak immediately</option>
+                <option value="end_of_speech">End of speech</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>TTS Engine</span>
+              <select id="translatorTtsEngineSelect">
+                <option value="omnivoice" selected>OmniVoice</option>
+                <option value="qwen3_tts">Qwen3-TTS</option>
+              </select>
+            </label>
           </div>
+        </div>
+
+        <div class="roomPanel" id="eventRoom">
+          <div class="eventHeader">
+            <div class="segmented" role="group" aria-label="Event role">
+              <button class="segment active" id="eventSpeakerRoleButton" data-role="speaker" type="button">
+                Speaker
+              </button>
+              <button class="segment" id="eventListenerRoleButton" data-role="listener" type="button">
+                Listener
+              </button>
+            </div>
+            <div class="eventCodeBox">
+              <span>Event Code</span>
+              <strong id="eventCodeDisplay">Not hosted</strong>
+            </div>
+          </div>
+
+          <div class="eventRolePanel active" id="eventSpeakerPanel">
+            <div class="controlGrid eventGrid">
+              <label class="field">
+                <span>Speaker Language</span>
+                <select id="eventSourceLanguageSelect">
+                  <option value="auto" selected>Auto-detect</option>
+                  <option value="it">Italian</option>
+                  <option value="en">English</option>
+                  <option value="de">German</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="ro">Romanian</option>
+                  <option value="sq">Albanian</option>
+                  <option value="ru">Russian</option>
+                  <option value="uk">Ukrainian</option>
+                  <option value="pl">Polish</option>
+                  <option value="sr">Serbian/Croatian/Bosnian</option>
+                  <option value="hr">Croatian</option>
+                  <option value="bs">Bosnian</option>
+                  <option value="ar">Arabic</option>
+                  <option value="zh">Simplified Chinese</option>
+                  <option value="hi">Hindi</option>
+                  <option value="ur">Urdu</option>
+                  <option value="sw">Swahili</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>TTS Engine</span>
+                <select id="eventTtsEngineSelect">
+                  <option value="omnivoice" selected>OmniVoice</option>
+                  <option value="qwen3_tts">Qwen3-TTS</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="eventRolePanel" id="eventListenerPanel">
+            <div class="controlGrid eventGrid">
+              <label class="field">
+                <span>Event Code</span>
+                <input id="eventCodeInput" autocomplete="off" inputmode="latin" placeholder="ABC123">
+              </label>
+              <label class="field">
+                <span>Listen In</span>
+                <select id="eventTargetLanguageSelect">
+                  <option value="en" selected>English</option>
+                  <option value="it">Italian</option>
+                  <option value="de">German</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="ro">Romanian</option>
+                  <option value="sq">Albanian</option>
+                  <option value="ru">Russian</option>
+                  <option value="uk">Ukrainian</option>
+                  <option value="pl">Polish</option>
+                  <option value="sr">Serbian/Croatian/Bosnian</option>
+                  <option value="hr">Croatian</option>
+                  <option value="bs">Bosnian</option>
+                  <option value="ar">Arabic</option>
+                  <option value="zh">Simplified Chinese</option>
+                  <option value="hi">Hindi</option>
+                  <option value="ur">Urdu</option>
+                  <option value="sw">Swahili</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="actionRow">
+          <button id="startButton" class="primary" type="button">Start assistant</button>
+          <button id="stopButton" type="button" disabled>Stop</button>
         </div>
       </section>
 
       <section class="workspace">
         <aside class="statusPanel">
           <div class="statusBlock">
-            <span class="label">Stato</span>
+            <span class="label">State</span>
             <strong id="stateLabel">Idle</strong>
           </div>
           <div class="meterWrap">
-            <span class="label">Microfono</span>
+            <span class="label">Microphone</span>
             <div class="meter">
               <div id="meterFill"></div>
             </div>
@@ -120,7 +270,7 @@
               <strong id="ttsLatency">-</strong>
             </div>
             <div>
-              <span class="label">Turno</span>
+              <span class="label">Turn</span>
               <strong id="turnLabel">-</strong>
             </div>
             <div>
@@ -129,9 +279,13 @@
             </div>
           </div>
           <div class="voiceCard">
-            <span class="label">Voce</span>
-            <strong id="voiceModeLabel">Voce OmniVoice stabile</strong>
-            <span id="audioModeLabel">Audio in attesa</span>
+            <span class="label">Voice</span>
+            <strong id="voiceModeLabel">OmniVoice ready</strong>
+            <span id="audioModeLabel">Audio idle</span>
+          </div>
+          <div class="eventStats">
+            <span class="label">Listeners</span>
+            <strong id="listenerCountLabel">0</strong>
           </div>
         </aside>
 
@@ -139,15 +293,15 @@
           <div class="conversationHeader">
             <div>
               <span class="label">Timeline</span>
-              <strong>Conversazione</strong>
+              <strong id="timelineTitle">Virtual Assistant</strong>
             </div>
-            <span id="connectionLabel" class="connectionPill">Offline</span>
+            <span id="roomBadge" class="connectionPill">Assistant</span>
           </div>
           <section class="conversation" id="conversation"></section>
         </section>
       </section>
     </main>
 
-    <script src="/static/app.js?v=17" type="module"></script>
+    <script src="/static/app.js?v=24" type="module"></script>
   </body>
 </html>

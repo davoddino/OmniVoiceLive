@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from live_tts.config import LiveTTSConfig
+from live_tts.event_rooms import EventRoomManager
 from live_tts.llm import LLMStreamer
 from live_tts.rag import RAGRetriever
 from live_tts.session import RealtimeSession
@@ -24,6 +25,7 @@ stt_service = STTService(config)
 llm_streamer = LLMStreamer(config)
 tts_service: BaseTTS = create_tts(config)
 rag_retriever = RAGRetriever(config)
+event_room_manager = EventRoomManager(config, stt_service, llm_streamer, tts_service)
 
 app = FastAPI(title="OmniVoice Live TTS", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -174,6 +176,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         rag_retriever,
     )
     await session.run()
+
+
+@app.websocket("/ws/event/speaker")
+async def event_speaker_endpoint(websocket: WebSocket) -> None:
+    await event_room_manager.handle_speaker(websocket)
+
+
+@app.websocket("/ws/event/listener")
+async def event_listener_endpoint(websocket: WebSocket) -> None:
+    await event_room_manager.handle_listener(websocket)
 
 
 def main() -> None:
