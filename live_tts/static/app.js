@@ -16,6 +16,7 @@ const voiceModeLabel = document.getElementById("voiceModeLabel");
 const listenerCountLabel = document.getElementById("listenerCountLabel");
 const timelineTitle = document.getElementById("timelineTitle");
 const roomBadge = document.getElementById("roomBadge");
+const shell = document.querySelector(".shell");
 
 const roomTabs = [...document.querySelectorAll(".roomTab")];
 const assistantRoom = document.getElementById("assistantRoom");
@@ -256,6 +257,7 @@ for (const select of engineSelects) {
   });
 }
 
+updateShellModeClasses();
 updateRoomControls();
 const normalizedPath = location.pathname.replace(/\/+$/, "");
 if (normalizedPath === "/demo" || normalizedPath === "/demos") {
@@ -1447,6 +1449,15 @@ function addSystemMessage(text) {
   addMessage("system", "System", text);
 }
 
+function updateShellModeClasses() {
+  if (!shell) {
+    return;
+  }
+  shell.dataset.room = activeRoom;
+  shell.dataset.dedicatedView = activeDedicatedView;
+  shell.dataset.dedicatedLoaded = dedicatedDemo ? "true" : "false";
+}
+
 async function loadDedicatedDemo() {
   const code = normalizeDemoCode(dedicatedCodeInput.value);
   if (!code) {
@@ -1478,6 +1489,7 @@ async function loadDedicatedDemo() {
     setState("error", "Error");
   } finally {
     dedicatedAccessButton.disabled = false;
+    updateShellModeClasses();
     updateRoomControls();
   }
 }
@@ -1486,6 +1498,7 @@ function unloadDedicatedDemo() {
   if (sessionStarted || pendingSessionStart) {
     return;
   }
+  switchDedicatedView("voice");
   dedicatedDemo = null;
   dedicatedEmailHistory = [];
   dedicatedDemoName.textContent = "-";
@@ -1496,6 +1509,7 @@ function unloadDedicatedDemo() {
   dedicatedGate.classList.remove("hidden");
   dedicatedSuite.classList.add("hidden");
   dedicatedAccessStatus.textContent = "";
+  updateShellModeClasses();
   updateRoomControls();
 }
 
@@ -1526,6 +1540,7 @@ function switchDedicatedView(view) {
     return;
   }
   activeDedicatedView = view;
+  updateShellModeClasses();
   for (const tab of dedicatedViewTabs) {
     tab.classList.toggle("active", tab.dataset.dedicatedView === view);
   }
@@ -1648,6 +1663,7 @@ function switchRoom(room) {
     return;
   }
   activeRoom = room;
+  updateShellModeClasses();
   for (const tab of roomTabs) {
     tab.classList.toggle("active", tab.dataset.room === room);
   }

@@ -4,41 +4,44 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OmniVoice Live</title>
-    <link rel="stylesheet" href="/static/styles.css?v=26">
+    <link rel="stylesheet" href="/static/styles.css?v=27">
   </head>
   <body>
-    <main class="shell">
-      <section class="topbar">
-        <div class="brandRow">
-          <div class="productMark">OV</div>
-          <div>
-            <h1>OmniVoice Live</h1>
-            <p id="sessionLabel">No session running</p>
+    <main class="shell" data-room="assistant" data-dedicated-view="voice">
+      <header class="commandBar">
+        <section class="topbar">
+          <div class="brandRow">
+            <div class="productMark">OV</div>
+            <div>
+              <h1>OmniVoice Live</h1>
+              <p id="sessionLabel">No session running</p>
+            </div>
           </div>
-        </div>
-        <div class="callMeta">
-          <span id="transportLabel" class="statusBadge">HTTPS/WSS</span>
-          <span id="timerLabel" class="timer">00:00</span>
-          <span id="connectionLabel" class="connectionPill">Offline</span>
-        </div>
-      </section>
+          <div class="callMeta">
+            <span id="transportLabel" class="statusBadge">HTTPS/WSS</span>
+            <span id="timerLabel" class="timer">00:00</span>
+            <span id="connectionLabel" class="connectionPill">Offline</span>
+          </div>
+        </section>
 
-      <nav class="roomSwitcher" aria-label="Rooms">
-        <button class="roomTab active" data-room="assistant" type="button">
-          Virtual Assistant
-        </button>
-        <button class="roomTab" data-room="translator" type="button">
-          Instant Translator
-        </button>
-        <button class="roomTab" data-room="event" type="button">
-          Event Interpreter
-        </button>
-        <button class="roomTab" data-room="dedicated" type="button">
-          Dedicated Demos
-        </button>
-      </nav>
+        <nav class="roomSwitcher" aria-label="Rooms">
+          <button class="roomTab active" data-room="assistant" type="button">
+            Virtual Assistant
+          </button>
+          <button class="roomTab" data-room="translator" type="button">
+            Instant Translator
+          </button>
+          <button class="roomTab" data-room="event" type="button">
+            Event Interpreter
+          </button>
+          <button class="roomTab" data-room="dedicated" type="button">
+            Dedicated Demos
+          </button>
+        </nav>
+      </header>
 
-      <section class="controlBand">
+      <section class="appSurface">
+        <aside class="controlBand">
         <div class="roomPanel active" id="assistantRoom">
           <div class="controlGrid assistantGrid">
             <label class="field">
@@ -353,10 +356,10 @@
           <button id="startButton" class="primary" type="button">Start assistant</button>
           <button id="stopButton" type="button" disabled>Stop</button>
         </div>
-      </section>
+        </aside>
 
-      <section class="workspace">
-        <aside class="statusPanel">
+        <section class="workspace">
+          <aside class="statusPanel">
           <div class="statusBlock">
             <span class="label">State</span>
             <strong id="stateLabel">Idle</strong>
@@ -394,21 +397,22 @@
             <span class="label">Listeners</span>
             <strong id="listenerCountLabel">0</strong>
           </div>
-        </aside>
+          </aside>
 
-        <section class="conversationPanel">
-          <div class="conversationHeader">
-            <div>
-              <span class="label">Timeline</span>
-              <strong id="timelineTitle">Virtual Assistant</strong>
+          <section class="conversationPanel">
+            <div class="conversationHeader">
+              <div>
+                <span class="label">Timeline</span>
+                <strong id="timelineTitle">Virtual Assistant</strong>
+              </div>
+              <span id="roomBadge" class="connectionPill">Assistant</span>
             </div>
-            <span id="roomBadge" class="connectionPill">Assistant</span>
-          </div>
-          <section class="conversation" id="conversation"></section>
+            <section class="conversation" id="conversation"></section>
+          </section>
         </section>
       </section>
     </main>
 
-    <script src="/static/app.js?v=26" type="module"></script>
+    <script src="/static/app.js?v=27" type="module"></script>
   </body>
 </html>
