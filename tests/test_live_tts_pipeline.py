@@ -361,6 +361,11 @@ class LiveTTSPipelineTests(unittest.TestCase):
         assert partner is not None
         self.assertIn("Milan", partner.opening_message)
         self.assertIn("same language", partner.system_prompt)
+        customer = get_email_scenario(demo, "customer")
+        assert customer is not None
+        self.assertIn("No emoji", customer.system_prompt)
+        self.assertIn("Go straight to the customer's request", customer.system_prompt)
+        self.assertIn("EUR 700-1,800", customer.system_prompt)
 
     def test_language_instruction_supports_expanded_languages(self) -> None:
         self.assertIn("Romanian", language_instruction("ro"))
