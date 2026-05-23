@@ -23,6 +23,7 @@ from live_tts.audio import (
     pcm16_bytes_from_float32,
 )
 from live_tts.config import LiveTTSConfig
+from live_tts.dedicated_demos import get_dedicated_demo
 from live_tts.languages import (
     SOURCE_LANGUAGE_OPTIONS,
     SUPPORTED_LANGUAGES,
@@ -986,6 +987,13 @@ class RealtimeSession:
             return
 
         prompt_mode = str(data.get("agent_prompt_mode") or "default").strip().lower()
+        if prompt_mode == "dedicated":
+            demo = get_dedicated_demo(data.get("dedicated_demo_code"))
+            if demo is not None:
+                self.agent_system_prompt = demo.voice_prompt
+                self.agent_prompt_mode = "dedicated"
+                return
+
         custom_prompt = str(data.get("agent_prompt") or "").strip()
         if prompt_mode == "custom" and custom_prompt:
             self.agent_system_prompt = custom_prompt[:12000]

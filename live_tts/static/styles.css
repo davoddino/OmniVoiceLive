@@ -279,6 +279,10 @@ p {
   font-size: 18px;
 }
 
+.dedicatedIntro p {
+  max-width: 520px;
+}
+
 .dedicatedHeader,
 .emailToolbar {
   display: flex;
@@ -300,6 +304,26 @@ p {
 
 .dedicatedView.active {
   display: block;
+}
+
+.dedicatedVoiceBrief {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #cfe0f6;
+  border-radius: 8px;
+  background: var(--blue-soft);
+}
+
+.dedicatedVoiceBrief strong {
+  font-size: 17px;
+}
+
+.dedicatedVoiceBrief p {
+  margin: 0;
+  max-width: 780px;
+  line-height: 1.45;
 }
 
 .inlineStatus {

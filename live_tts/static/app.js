@@ -64,7 +64,7 @@ const dedicatedVoiceView = document.getElementById("dedicatedVoiceView");
 const dedicatedEmailView = document.getElementById("dedicatedEmailView");
 const dedicatedLanguageSelect = document.getElementById("dedicatedLanguageSelect");
 const dedicatedTtsEngineSelect = document.getElementById("dedicatedTtsEngineSelect");
-const dedicatedVoicePrompt = document.getElementById("dedicatedVoicePrompt");
+const dedicatedVoiceBriefText = document.getElementById("dedicatedVoiceBriefText");
 const dedicatedEmailScenarioSelect = document.getElementById(
   "dedicatedEmailScenarioSelect",
 );
@@ -745,10 +745,10 @@ function sendSessionStart() {
   activeSessionMode = activeRoom === "translator" ? "translator" : "agent";
   activeTranslationTiming = translationTimingSelect.value;
   const agentPromptMode =
-    activeRoom === "dedicated" ? "custom" : assistantPromptModeSelect.value;
+    activeRoom === "dedicated" ? "dedicated" : assistantPromptModeSelect.value;
   const agentPrompt =
     activeRoom === "dedicated" && dedicatedDemo
-      ? dedicatedDemo.voice_prompt
+      ? ""
       : customPromptInput.value;
   const payload = {
     type: "session.start",
@@ -762,7 +762,9 @@ function sendSessionStart() {
   };
   if (activeSessionMode === "agent") {
     payload.agent_prompt_mode = agentPromptMode;
-    if (agentPromptMode === "custom") {
+    if (agentPromptMode === "dedicated" && dedicatedDemo) {
+      payload.dedicated_demo_code = dedicatedDemo.code;
+    } else if (agentPromptMode === "custom") {
       payload.agent_prompt = agentPrompt;
     }
   }
@@ -1448,20 +1450,20 @@ function addSystemMessage(text) {
 async function loadDedicatedDemo() {
   const code = normalizeDemoCode(dedicatedCodeInput.value);
   if (!code) {
-    dedicatedAccessStatus.textContent = "Enter a demo code";
+    dedicatedAccessStatus.textContent = "Access code required";
     setState("error", "Error");
     return;
   }
   dedicatedAccessButton.disabled = true;
-  dedicatedAccessStatus.textContent = "Loading demo...";
+  dedicatedAccessStatus.textContent = "Checking access...";
   try {
     const response = await fetch(`/api/dedicated-demos/${encodeURIComponent(code)}`);
     if (!response.ok) {
-      throw new Error("Demo code not found");
+      throw new Error("Access denied");
     }
     dedicatedDemo = await response.json();
     dedicatedDemoName.textContent = dedicatedDemo.name;
-    dedicatedVoicePrompt.value = dedicatedDemo.voice_prompt || "";
+    dedicatedVoiceBriefText.textContent = dedicatedDemo.voice_brief || "";
     populateDedicatedScenarios(dedicatedDemo.email_scenarios || []);
     dedicatedGate.classList.add("hidden");
     dedicatedSuite.classList.remove("hidden");
@@ -1487,13 +1489,13 @@ function unloadDedicatedDemo() {
   dedicatedDemo = null;
   dedicatedEmailHistory = [];
   dedicatedDemoName.textContent = "-";
-  dedicatedVoicePrompt.value = "";
+  dedicatedVoiceBriefText.textContent = "";
   dedicatedEmailPrompt.value = "";
   dedicatedEmailThread.innerHTML = "";
   dedicatedEmailScenarioSelect.innerHTML = "";
   dedicatedGate.classList.remove("hidden");
   dedicatedSuite.classList.add("hidden");
-  dedicatedAccessStatus.textContent = "No demo loaded";
+  dedicatedAccessStatus.textContent = "";
   updateRoomControls();
 }
 
@@ -1704,12 +1706,12 @@ function updateRoomControls() {
         audioModeLabel.textContent = "Text-only email demo";
       }
     } else {
-      startButton.textContent = dedicatedDemo ? "Start voice demo" : "Open a demo first";
+      startButton.textContent = dedicatedDemo ? "Start voice demo" : "Access required";
       if (!sessionStarted && !pendingSessionStart) {
         startButton.disabled = !dedicatedDemo;
         audioModeLabel.textContent = dedicatedDemo
           ? "Dedicated voice idle"
-          : "Dedicated demo locked";
+          : "Access required";
       }
     }
   } else if (activeEventRole === "speaker") {
@@ -1817,7 +1819,7 @@ function updateSessionLabel(message = {}) {
 
   if (activeRoom === "dedicated") {
     if (!dedicatedDemo) {
-      sessionLabel.textContent = "Enter dedicated demo code";
+      sessionLabel.textContent = "Enter access code";
       return;
     }
     if (activeDedicatedView === "email") {

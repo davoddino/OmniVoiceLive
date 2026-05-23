@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OmniVoice Live</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=26">
   </head>
   <body>
     <main class="shell">
@@ -85,7 +85,6 @@
             <textarea
               id="customPromptInput"
               rows="5"
-              placeholder="Define the assistant role, boundaries, tone, and business context."
             ></textarea>
           </label>
         </div>
@@ -215,7 +214,7 @@
             <div class="controlGrid eventGrid">
               <label class="field">
                 <span>Event Code</span>
-                <input id="eventCodeInput" autocomplete="off" inputmode="latin" placeholder="ABC123">
+                <input id="eventCodeInput" autocomplete="off" inputmode="latin">
               </label>
               <label class="field">
                 <span>Listen In</span>
@@ -248,16 +247,16 @@
         <div class="roomPanel" id="dedicatedRoom">
           <div class="dedicatedGate" id="dedicatedGate">
             <div class="dedicatedIntro">
-              <strong>Dedicated demo access</strong>
-              <p>Enter the customer demo code to open the private demo workspace.</p>
+              <strong>Private Demo</strong>
+              <p>Enter your access code.</p>
             </div>
             <div class="controlGrid dedicatedAccessGrid">
               <label class="field">
-                <span>Demo Code</span>
-                <input id="dedicatedCodeInput" autocomplete="off" inputmode="latin" placeholder="GRUBER">
+                <span>Access Code</span>
+                <input id="dedicatedCodeInput" autocomplete="off" inputmode="latin">
               </label>
-              <button id="dedicatedAccessButton" class="primary" type="button">Open demo</button>
-              <span id="dedicatedAccessStatus" class="inlineStatus">No demo loaded</span>
+              <button id="dedicatedAccessButton" class="primary" type="button">Continue</button>
+              <span id="dedicatedAccessStatus" class="inlineStatus"></span>
             </div>
           </div>
 
@@ -279,6 +278,11 @@
             </div>
 
             <div class="dedicatedView active" id="dedicatedVoiceView">
+              <div class="dedicatedVoiceBrief">
+                <span class="label">Voice Demo</span>
+                <strong>Front-office call assistant</strong>
+                <p id="dedicatedVoiceBriefText"></p>
+              </div>
               <div class="controlGrid dedicatedVoiceGrid">
                 <label class="field">
                   <span>Assistant Language</span>
@@ -312,10 +316,6 @@
                   </select>
                 </label>
               </div>
-              <label class="field promptField">
-                <span>Voice Secretary Prompt</span>
-                <textarea id="dedicatedVoicePrompt" rows="6" readonly></textarea>
-              </label>
             </div>
 
             <div class="dedicatedView" id="dedicatedEmailView">
@@ -329,7 +329,7 @@
               </div>
               <div class="emailDemoGrid">
                 <label class="field emailPromptPane">
-                  <span>Context / Prompt</span>
+                  <span>Operating Brief</span>
                   <textarea id="dedicatedEmailPrompt" rows="14" readonly></textarea>
                 </label>
                 <section class="emailThreadPane" aria-label="Email thread">
@@ -338,7 +338,6 @@
                     <textarea
                       id="dedicatedEmailInput"
                       rows="4"
-                      placeholder="Write your email reply here..."
                     ></textarea>
                     <button id="dedicatedEmailSendButton" class="primary" type="submit">
                       Send email
@@ -410,6 +409,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=25" type="module"></script>
+    <script src="/static/app.js?v=26" type="module"></script>
   </body>
 </html>

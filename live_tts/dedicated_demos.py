@@ -17,6 +17,7 @@ class EmailScenario:
 class DedicatedDemo:
     code: str
     name: str
+    voice_brief: str
     voice_prompt: str
     email_scenarios: tuple[EmailScenario, ...]
 
@@ -24,7 +25,7 @@ class DedicatedDemo:
         return {
             "code": self.code,
             "name": self.name,
-            "voice_prompt": self.voice_prompt,
+            "voice_brief": self.voice_brief,
             "email_scenarios": [
                 {
                     "id": scenario.id,
@@ -164,6 +165,11 @@ Company context:
 GRUBER_DEMO = DedicatedDemo(
     code="GRUBER",
     name="GRUBER Logistics",
+    voice_brief=(
+        "A professional logistics front-office assistant that can collect "
+        "shipment details, route requests to the right department, and explain "
+        "service options without issuing binding quotes."
+    ),
     voice_prompt=GRUBER_VOICE_PROMPT,
     email_scenarios=(
         EmailScenario(
