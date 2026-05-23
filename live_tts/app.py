@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import logging
+import threading
 from importlib.util import find_spec
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from live_tts.config import LiveTTSConfig
+from live_tts.dedicated_demos import get_dedicated_demo, get_email_scenario
 from live_tts.event_rooms import EventRoomManager
 from live_tts.llm import LLMStreamer
 from live_tts.rag import RAGRetriever
@@ -29,6 +32,18 @@ event_room_manager = EventRoomManager(config, stt_service, llm_streamer, tts_ser
 
 app = FastAPI(title="OmniVoice Live TTS", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+class DedicatedEmailMessage(BaseModel):
+    role: str
+    content: str
+
+
+class DedicatedEmailRequest(BaseModel):
+    code: str
+    scenario: str = "partner"
+    message: str
+    history: list[DedicatedEmailMessage] = Field(default_factory=list)
 
 
 @app.on_event("startup")
@@ -81,6 +96,51 @@ async def startup() -> None:
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/demo")
+@app.get("/demos")
+async def dedicated_demo_index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/dedicated-demos/{code}")
+async def dedicated_demo(code: str) -> dict[str, object]:
+    demo = get_dedicated_demo(code)
+    if demo is None:
+        raise HTTPException(status_code=404, detail="Dedicated demo not found")
+    return demo.public_payload()
+
+
+@app.post("/api/dedicated-demos/email")
+async def dedicated_demo_email(request: DedicatedEmailRequest) -> dict[str, object]:
+    demo = get_dedicated_demo(request.code)
+    if demo is None:
+        raise HTTPException(status_code=404, detail="Dedicated demo not found")
+
+    scenario = get_email_scenario(demo, request.scenario)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Email scenario not found")
+
+    message = request.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+    if len(message) > 4000:
+        raise HTTPException(status_code=413, detail="Message is too long")
+
+    history = sanitize_email_history(request.history)
+    reply = await llm_streamer.complete(
+        message,
+        history,
+        threading.Event(),
+        language=None,
+        system_prompt=scenario.system_prompt,
+    )
+    return {
+        "demo": demo.code,
+        "scenario": scenario.id,
+        "reply": reply,
+    }
 
 
 @app.get("/health")
@@ -163,6 +223,21 @@ def tts_engines() -> list[dict[str, object]]:
             }
         ]
     return engines()
+
+
+def sanitize_email_history(
+    history: list[DedicatedEmailMessage],
+) -> list[dict[str, str]]:
+    sanitized: list[dict[str, str]] = []
+    for message in history[-12:]:
+        role = message.role.strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = message.content.strip()
+        if not content:
+            continue
+        sanitized.append({"role": role, "content": content[:3000]})
+    return sanitized[-10:]
 
 
 @app.websocket("/ws")

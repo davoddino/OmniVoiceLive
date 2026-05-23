@@ -16,6 +16,11 @@ from live_tts.audio import (
     pad_audio_edges,
     trim_tts_onset_noise,
 )
+from live_tts.dedicated_demos import (
+    get_dedicated_demo,
+    get_email_scenario,
+    normalize_demo_code,
+)
 from live_tts.event_rooms import EventRoomManager, normalize_event_code
 from live_tts.languages import (
     SUPPORTED_LANGUAGES,
@@ -323,6 +328,36 @@ class LiveTTSPipelineTests(unittest.TestCase):
 
         self.assertEqual(messages[0]["content"], "Custom assistant behavior")
         self.assertIn("Answer only in English", messages[1]["content"])
+
+    def test_agent_llm_messages_can_skip_fixed_language_for_email_demo(self) -> None:
+        config = SimpleNamespace(system_prompt="Default CavadaLabs prompt")
+        messages = llm_messages(
+            config,
+            "Buongiorno, possiamo caricare domani?",
+            [],
+            None,
+            "",
+            system_prompt="Answer in the same language as the latest email.",
+        )
+
+        serialized = json.dumps(messages)
+        self.assertNotIn("Answer only in Italian", serialized)
+        self.assertIn("same language", messages[0]["content"])
+
+    def test_gruber_dedicated_demo_contains_voice_and_email_scenarios(self) -> None:
+        demo = get_dedicated_demo("gruber logistics")
+
+        self.assertIsNotNone(demo)
+        assert demo is not None
+        self.assertEqual(normalize_demo_code("gruber logistics"), "GRUBERLOGISTICS")
+        self.assertIn("GRUBER Logistics", demo.name)
+        self.assertIn("front-office voice assistant", demo.voice_prompt)
+        self.assertIsNotNone(get_email_scenario(demo, "partner"))
+        self.assertIsNotNone(get_email_scenario(demo, "customer"))
+        partner = get_email_scenario(demo, "partner")
+        assert partner is not None
+        self.assertIn("Milan", partner.opening_message)
+        self.assertIn("same language", partner.system_prompt)
 
     def test_language_instruction_supports_expanded_languages(self) -> None:
         self.assertIn("Romanian", language_instruction("ro"))

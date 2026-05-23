@@ -46,6 +46,36 @@ class LLMStreamer:
         ):
             yield piece
 
+    async def complete(
+        self,
+        prompt: str,
+        history: list[dict[str, str]],
+        cancel_event: threading.Event | None = None,
+        language: str | None = None,
+        rag_context: str = "",
+        mode: str = "agent",
+        source_language: str | None = None,
+        target_language: str | None = None,
+        live_translation: bool = False,
+        system_prompt: str | None = None,
+    ) -> str:
+        parts: list[str] = []
+        cancel = cancel_event or threading.Event()
+        async for piece in self.stream(
+            prompt,
+            history,
+            cancel,
+            language=language,
+            rag_context=rag_context,
+            mode=mode,
+            source_language=source_language,
+            target_language=target_language,
+            live_translation=live_translation,
+            system_prompt=system_prompt,
+        ):
+            parts.append(piece)
+        return "".join(parts).strip()
+
     async def _openai_compatible_stream(
         self,
         prompt: str,
@@ -204,7 +234,11 @@ def llm_messages(
 
     return [
         {"role": "system", "content": system_prompt or config.system_prompt},
-        {"role": "system", "content": language_instruction(language)},
+        *(
+            [{"role": "system", "content": language_instruction(language)}]
+            if language
+            else []
+        ),
         *([rag_system_message(rag_context)] if rag_context else []),
         *history[-10:],
         {"role": "user", "content": prompt},

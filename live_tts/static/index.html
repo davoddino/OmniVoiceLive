@@ -33,6 +33,9 @@
         <button class="roomTab" data-room="event" type="button">
           Event Interpreter
         </button>
+        <button class="roomTab" data-room="dedicated" type="button">
+          Dedicated Demos
+        </button>
       </nav>
 
       <section class="controlBand">
@@ -242,6 +245,111 @@
           </div>
         </div>
 
+        <div class="roomPanel" id="dedicatedRoom">
+          <div class="dedicatedGate" id="dedicatedGate">
+            <div class="dedicatedIntro">
+              <strong>Dedicated demo access</strong>
+              <p>Enter the customer demo code to open the private demo workspace.</p>
+            </div>
+            <div class="controlGrid dedicatedAccessGrid">
+              <label class="field">
+                <span>Demo Code</span>
+                <input id="dedicatedCodeInput" autocomplete="off" inputmode="latin" placeholder="GRUBER">
+              </label>
+              <button id="dedicatedAccessButton" class="primary" type="button">Open demo</button>
+              <span id="dedicatedAccessStatus" class="inlineStatus">No demo loaded</span>
+            </div>
+          </div>
+
+          <div class="dedicatedSuite hidden" id="dedicatedSuite">
+            <div class="dedicatedHeader">
+              <div>
+                <span class="label">Dedicated Demo</span>
+                <strong id="dedicatedDemoName">-</strong>
+              </div>
+              <div class="segmented" role="group" aria-label="Dedicated demo type">
+                <button class="segment active" id="dedicatedVoiceTab" data-dedicated-view="voice" type="button">
+                  Voice Secretary
+                </button>
+                <button class="segment" id="dedicatedEmailTab" data-dedicated-view="email" type="button">
+                  Email Desk
+                </button>
+              </div>
+              <button id="dedicatedChangeButton" type="button">Change code</button>
+            </div>
+
+            <div class="dedicatedView active" id="dedicatedVoiceView">
+              <div class="controlGrid dedicatedVoiceGrid">
+                <label class="field">
+                  <span>Assistant Language</span>
+                  <select id="dedicatedLanguageSelect">
+                    <option value="en" selected>English</option>
+                    <option value="it">Italian</option>
+                    <option value="de">German</option>
+                    <option value="fr">French</option>
+                    <option value="es">Spanish</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ro">Romanian</option>
+                    <option value="sq">Albanian</option>
+                    <option value="ru">Russian</option>
+                    <option value="uk">Ukrainian</option>
+                    <option value="pl">Polish</option>
+                    <option value="sr">Serbian/Croatian/Bosnian</option>
+                    <option value="hr">Croatian</option>
+                    <option value="bs">Bosnian</option>
+                    <option value="ar">Arabic</option>
+                    <option value="zh">Simplified Chinese</option>
+                    <option value="hi">Hindi</option>
+                    <option value="ur">Urdu</option>
+                    <option value="sw">Swahili</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>TTS Engine</span>
+                  <select id="dedicatedTtsEngineSelect">
+                    <option value="omnivoice" selected>OmniVoice</option>
+                    <option value="qwen3_tts">Qwen3-TTS</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field promptField">
+                <span>Voice Secretary Prompt</span>
+                <textarea id="dedicatedVoicePrompt" rows="6" readonly></textarea>
+              </label>
+            </div>
+
+            <div class="dedicatedView" id="dedicatedEmailView">
+              <div class="emailToolbar">
+                <label class="field">
+                  <span>Email Scenario</span>
+                  <select id="dedicatedEmailScenarioSelect"></select>
+                </label>
+                <button id="dedicatedEmailResetButton" type="button">Reset thread</button>
+                <span id="dedicatedEmailRole" class="inlineStatus">-</span>
+              </div>
+              <div class="emailDemoGrid">
+                <label class="field emailPromptPane">
+                  <span>Context / Prompt</span>
+                  <textarea id="dedicatedEmailPrompt" rows="14" readonly></textarea>
+                </label>
+                <section class="emailThreadPane" aria-label="Email thread">
+                  <div class="emailThread" id="dedicatedEmailThread"></div>
+                  <form class="emailComposer" id="dedicatedEmailForm">
+                    <textarea
+                      id="dedicatedEmailInput"
+                      rows="4"
+                      placeholder="Write your email reply here..."
+                    ></textarea>
+                    <button id="dedicatedEmailSendButton" class="primary" type="submit">
+                      Send email
+                    </button>
+                  </form>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="actionRow">
           <button id="startButton" class="primary" type="button">Start assistant</button>
           <button id="stopButton" type="button" disabled>Stop</button>
@@ -302,6 +410,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=24" type="module"></script>
+    <script src="/static/app.js?v=25" type="module"></script>
   </body>
 </html>

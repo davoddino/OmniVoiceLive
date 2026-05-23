@@ -21,10 +21,12 @@ const roomTabs = [...document.querySelectorAll(".roomTab")];
 const assistantRoom = document.getElementById("assistantRoom");
 const translatorRoom = document.getElementById("translatorRoom");
 const eventRoom = document.getElementById("eventRoom");
+const dedicatedRoom = document.getElementById("dedicatedRoom");
 const roomPanels = {
   assistant: assistantRoom,
   translator: translatorRoom,
   event: eventRoom,
+  dedicated: dedicatedRoom,
 };
 
 const languageSelect = document.getElementById("languageSelect");
@@ -49,13 +51,49 @@ const eventTtsEngineSelect = document.getElementById("eventTtsEngineSelect");
 const eventCodeInput = document.getElementById("eventCodeInput");
 const eventCodeDisplay = document.getElementById("eventCodeDisplay");
 
+const dedicatedGate = document.getElementById("dedicatedGate");
+const dedicatedSuite = document.getElementById("dedicatedSuite");
+const dedicatedCodeInput = document.getElementById("dedicatedCodeInput");
+const dedicatedAccessButton = document.getElementById("dedicatedAccessButton");
+const dedicatedAccessStatus = document.getElementById("dedicatedAccessStatus");
+const dedicatedDemoName = document.getElementById("dedicatedDemoName");
+const dedicatedChangeButton = document.getElementById("dedicatedChangeButton");
+const dedicatedVoiceTab = document.getElementById("dedicatedVoiceTab");
+const dedicatedEmailTab = document.getElementById("dedicatedEmailTab");
+const dedicatedVoiceView = document.getElementById("dedicatedVoiceView");
+const dedicatedEmailView = document.getElementById("dedicatedEmailView");
+const dedicatedLanguageSelect = document.getElementById("dedicatedLanguageSelect");
+const dedicatedTtsEngineSelect = document.getElementById("dedicatedTtsEngineSelect");
+const dedicatedVoicePrompt = document.getElementById("dedicatedVoicePrompt");
+const dedicatedEmailScenarioSelect = document.getElementById(
+  "dedicatedEmailScenarioSelect",
+);
+const dedicatedEmailResetButton = document.getElementById("dedicatedEmailResetButton");
+const dedicatedEmailRole = document.getElementById("dedicatedEmailRole");
+const dedicatedEmailPrompt = document.getElementById("dedicatedEmailPrompt");
+const dedicatedEmailThread = document.getElementById("dedicatedEmailThread");
+const dedicatedEmailForm = document.getElementById("dedicatedEmailForm");
+const dedicatedEmailInput = document.getElementById("dedicatedEmailInput");
+const dedicatedEmailSendButton = document.getElementById("dedicatedEmailSendButton");
+const dedicatedViewTabs = [dedicatedVoiceTab, dedicatedEmailTab];
+const dedicatedViews = {
+  voice: dedicatedVoiceView,
+  email: dedicatedEmailView,
+};
+
 const targetLanguageSelects = [
   languageSelect,
   translatorTargetLanguageSelect,
   eventTargetLanguageSelect,
+  dedicatedLanguageSelect,
 ];
 const sourceLanguageSelects = [sourceLanguageSelect, eventSourceLanguageSelect];
-const engineSelects = [ttsEngineSelect, translatorTtsEngineSelect, eventTtsEngineSelect];
+const engineSelects = [
+  ttsEngineSelect,
+  translatorTtsEngineSelect,
+  eventTtsEngineSelect,
+  dedicatedTtsEngineSelect,
+];
 
 const LANGUAGE_LABELS = {
   it: "Italian",
@@ -93,12 +131,17 @@ const ROOM_TITLES = {
   assistant: "Virtual Assistant",
   translator: "Instant Translator",
   event: "Event Interpreter",
+  dedicated: "Dedicated Demos",
 };
 
 let socket = null;
 let activeProtocol = "";
 let activeRoom = "assistant";
 let activeEventRole = "speaker";
+let activeDedicatedView = "voice";
+let dedicatedDemo = null;
+let dedicatedEmailHistory = [];
+let dedicatedEmailBusy = false;
 let audioContext = null;
 let recorderNode = null;
 let recorderSinkNode = null;
@@ -160,9 +203,28 @@ eventTargetLanguageSelect.addEventListener("change", onEventTargetLanguageChange
 eventCodeInput.addEventListener("input", () => {
   eventCodeInput.value = normalizeEventCode(eventCodeInput.value);
 });
+dedicatedCodeInput.addEventListener("input", () => {
+  dedicatedCodeInput.value = normalizeDemoCode(dedicatedCodeInput.value);
+});
+dedicatedCodeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    loadDedicatedDemo();
+  }
+});
+dedicatedAccessButton.addEventListener("click", loadDedicatedDemo);
+dedicatedChangeButton.addEventListener("click", unloadDedicatedDemo);
+dedicatedEmailScenarioSelect.addEventListener("change", resetDedicatedEmailThread);
+dedicatedEmailResetButton.addEventListener("click", resetDedicatedEmailThread);
+dedicatedEmailForm.addEventListener("submit", sendDedicatedEmail);
+dedicatedLanguageSelect.addEventListener("change", updateRoomControls);
 
 for (const tab of roomTabs) {
   tab.addEventListener("click", () => switchRoom(tab.dataset.room));
+}
+
+for (const tab of dedicatedViewTabs) {
+  tab.addEventListener("click", () => switchDedicatedView(tab.dataset.dedicatedView));
 }
 
 for (const button of [eventSpeakerRoleButton, eventListenerRoleButton]) {
@@ -195,8 +257,23 @@ for (const select of engineSelects) {
 }
 
 updateRoomControls();
+const normalizedPath = location.pathname.replace(/\/+$/, "");
+if (normalizedPath === "/demo" || normalizedPath === "/demos") {
+  switchRoom("dedicated");
+}
 
 async function startCall() {
+  if (activeRoom === "dedicated") {
+    if (!dedicatedDemo) {
+      addSystemMessage("Open a dedicated demo before starting the voice secretary.");
+      setState("error", "Error");
+      return;
+    }
+    if (activeDedicatedView === "email") {
+      addSystemMessage("Use the email composer in the Email Desk demo.");
+      return;
+    }
+  }
   if (activeRoom === "event" && activeEventRole === "listener") {
     await startEventListener();
     return;
@@ -667,6 +744,12 @@ function sendSessionStart() {
   pendingSessionStart = false;
   activeSessionMode = activeRoom === "translator" ? "translator" : "agent";
   activeTranslationTiming = translationTimingSelect.value;
+  const agentPromptMode =
+    activeRoom === "dedicated" ? "custom" : assistantPromptModeSelect.value;
+  const agentPrompt =
+    activeRoom === "dedicated" && dedicatedDemo
+      ? dedicatedDemo.voice_prompt
+      : customPromptInput.value;
   const payload = {
     type: "session.start",
     sample_rate: audioContext ? audioContext.sampleRate : 48000,
@@ -678,13 +761,17 @@ function sendSessionStart() {
     tts_engine: selectedEngine(),
   };
   if (activeSessionMode === "agent") {
-    payload.agent_prompt_mode = assistantPromptModeSelect.value;
-    if (assistantPromptModeSelect.value === "custom") {
-      payload.agent_prompt = customPromptInput.value;
+    payload.agent_prompt_mode = agentPromptMode;
+    if (agentPromptMode === "custom") {
+      payload.agent_prompt = agentPrompt;
     }
   }
   const modeLabel =
-    activeSessionMode === "translator" ? "Instant Translator" : "Virtual Assistant";
+    activeSessionMode === "translator"
+      ? "Instant Translator"
+      : activeRoom === "dedicated" && dedicatedDemo
+        ? `${dedicatedDemo.name} Voice Secretary`
+        : "Virtual Assistant";
   addSystemMessage(`Starting ${modeLabel}.`);
   socket.send(JSON.stringify(payload));
 }
@@ -1358,6 +1445,202 @@ function addSystemMessage(text) {
   addMessage("system", "System", text);
 }
 
+async function loadDedicatedDemo() {
+  const code = normalizeDemoCode(dedicatedCodeInput.value);
+  if (!code) {
+    dedicatedAccessStatus.textContent = "Enter a demo code";
+    setState("error", "Error");
+    return;
+  }
+  dedicatedAccessButton.disabled = true;
+  dedicatedAccessStatus.textContent = "Loading demo...";
+  try {
+    const response = await fetch(`/api/dedicated-demos/${encodeURIComponent(code)}`);
+    if (!response.ok) {
+      throw new Error("Demo code not found");
+    }
+    dedicatedDemo = await response.json();
+    dedicatedDemoName.textContent = dedicatedDemo.name;
+    dedicatedVoicePrompt.value = dedicatedDemo.voice_prompt || "";
+    populateDedicatedScenarios(dedicatedDemo.email_scenarios || []);
+    dedicatedGate.classList.add("hidden");
+    dedicatedSuite.classList.remove("hidden");
+    dedicatedAccessStatus.textContent = `${dedicatedDemo.name} loaded`;
+    switchDedicatedView("voice");
+    resetDedicatedEmailThread();
+    addSystemMessage(`${dedicatedDemo.name} dedicated demo loaded.`);
+    setState("idle", "Idle");
+  } catch (error) {
+    dedicatedDemo = null;
+    dedicatedAccessStatus.textContent = error.message || "Unable to load demo";
+    setState("error", "Error");
+  } finally {
+    dedicatedAccessButton.disabled = false;
+    updateRoomControls();
+  }
+}
+
+function unloadDedicatedDemo() {
+  if (sessionStarted || pendingSessionStart) {
+    return;
+  }
+  dedicatedDemo = null;
+  dedicatedEmailHistory = [];
+  dedicatedDemoName.textContent = "-";
+  dedicatedVoicePrompt.value = "";
+  dedicatedEmailPrompt.value = "";
+  dedicatedEmailThread.innerHTML = "";
+  dedicatedEmailScenarioSelect.innerHTML = "";
+  dedicatedGate.classList.remove("hidden");
+  dedicatedSuite.classList.add("hidden");
+  dedicatedAccessStatus.textContent = "No demo loaded";
+  updateRoomControls();
+}
+
+function populateDedicatedScenarios(scenarios) {
+  dedicatedEmailScenarioSelect.innerHTML = "";
+  for (const scenario of scenarios) {
+    const option = document.createElement("option");
+    option.value = scenario.id;
+    option.textContent = scenario.label;
+    dedicatedEmailScenarioSelect.appendChild(option);
+  }
+}
+
+function selectedDedicatedScenario() {
+  if (!dedicatedDemo || !Array.isArray(dedicatedDemo.email_scenarios)) {
+    return null;
+  }
+  const selected = dedicatedEmailScenarioSelect.value;
+  return (
+    dedicatedDemo.email_scenarios.find((scenario) => scenario.id === selected) ||
+    dedicatedDemo.email_scenarios[0] ||
+    null
+  );
+}
+
+function switchDedicatedView(view) {
+  if (!view || view === activeDedicatedView || sessionStarted || pendingSessionStart) {
+    return;
+  }
+  activeDedicatedView = view;
+  for (const tab of dedicatedViewTabs) {
+    tab.classList.toggle("active", tab.dataset.dedicatedView === view);
+  }
+  for (const [name, panel] of Object.entries(dedicatedViews)) {
+    panel.classList.toggle("active", name === view);
+  }
+  updateRoomControls();
+  updateSessionLabel();
+}
+
+function resetDedicatedEmailThread() {
+  dedicatedEmailHistory = [];
+  const scenario = selectedDedicatedScenario();
+  dedicatedEmailPrompt.value = scenario ? scenario.display_prompt || "" : "";
+  dedicatedEmailRole.textContent = scenario ? scenario.user_role || "" : "-";
+  if (scenario && scenario.opening_message) {
+    dedicatedEmailHistory.push({
+      role: "assistant",
+      content: scenario.opening_message,
+    });
+  }
+  renderDedicatedEmailThread();
+  updateRoomControls();
+}
+
+async function sendDedicatedEmail(event) {
+  event.preventDefault();
+  if (!dedicatedDemo || dedicatedEmailBusy) {
+    return;
+  }
+  const scenario = selectedDedicatedScenario();
+  const text = dedicatedEmailInput.value.trim();
+  if (!scenario || !text) {
+    return;
+  }
+  const historyBefore = dedicatedEmailHistory.slice();
+  dedicatedEmailHistory.push({ role: "user", content: text });
+  dedicatedEmailInput.value = "";
+  renderDedicatedEmailThread();
+  setDedicatedEmailBusy(true);
+  try {
+    const response = await fetch("/api/dedicated-demos/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: dedicatedDemo.code,
+        scenario: scenario.id,
+        message: text,
+        history: historyBefore,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || "Email demo request failed");
+    }
+    const data = await response.json();
+    dedicatedEmailHistory.push({
+      role: "assistant",
+      content: data.reply || "",
+    });
+  } catch (error) {
+    dedicatedEmailHistory.push({
+      role: "system",
+      content: error.message || "Email demo request failed",
+    });
+  } finally {
+    renderDedicatedEmailThread();
+    setDedicatedEmailBusy(false);
+  }
+}
+
+function setDedicatedEmailBusy(busy) {
+  dedicatedEmailBusy = busy;
+  dedicatedEmailSendButton.disabled = busy;
+  dedicatedEmailInput.disabled = busy;
+  dedicatedEmailSendButton.textContent = busy ? "Writing..." : "Send email";
+}
+
+function renderDedicatedEmailThread() {
+  dedicatedEmailThread.innerHTML = "";
+  if (!dedicatedEmailHistory.length) {
+    appendDedicatedEmailMessage(
+      "system",
+      "Demo",
+      "Write the first email to start this scenario.",
+    );
+    return;
+  }
+  for (const message of dedicatedEmailHistory) {
+    const title =
+      message.role === "assistant"
+        ? dedicatedDemo?.name || "Assistant"
+        : message.role === "user"
+          ? "You"
+          : "System";
+    appendDedicatedEmailMessage(message.role, title, message.content);
+  }
+}
+
+function appendDedicatedEmailMessage(role, title, text) {
+  const node = document.createElement("article");
+  node.className = `emailMessage ${role}`;
+  node.innerHTML = `
+    <div class="emailMessageHead">
+      <span></span>
+      <span></span>
+    </div>
+    <div class="emailMessageBody"></div>
+  `;
+  const head = node.querySelectorAll(".emailMessageHead span");
+  head[0].textContent = title;
+  head[1].textContent = new Date().toLocaleTimeString();
+  node.querySelector(".emailMessageBody").textContent = text;
+  dedicatedEmailThread.appendChild(node);
+  dedicatedEmailThread.scrollTop = dedicatedEmailThread.scrollHeight;
+}
+
 function switchRoom(room) {
   if (!room || room === activeRoom || sessionStarted || pendingSessionStart) {
     return;
@@ -1370,7 +1653,14 @@ function switchRoom(room) {
     panel.classList.toggle("active", name === room);
   }
   timelineTitle.textContent = ROOM_TITLES[room];
-  roomBadge.textContent = room === "event" ? "Event" : room === "translator" ? "Translator" : "Assistant";
+  roomBadge.textContent =
+    room === "event"
+      ? "Event"
+      : room === "translator"
+        ? "Translator"
+        : room === "dedicated"
+          ? "Demo"
+          : "Assistant";
   activeAssistantMessage = null;
   activeEventMessages = new Map();
   updateRoomControls();
@@ -1393,6 +1683,10 @@ function switchEventRole(role) {
 function updateRoomControls() {
   const promptCustom = assistantPromptModeSelect.value === "custom";
   customPromptWrap.classList.toggle("hidden", !promptCustom);
+  if (!sessionStarted && !pendingSessionStart) {
+    startButton.disabled = false;
+    stopButton.disabled = true;
+  }
   if (activeRoom === "assistant") {
     startButton.textContent = "Start assistant";
     audioModeLabel.textContent = sessionStarted ? audioModeLabel.textContent : "Audio idle";
@@ -1400,6 +1694,23 @@ function updateRoomControls() {
     startButton.textContent = "Start translator";
     if (!sessionStarted && translationTimingSelect.value === "immediate") {
       audioModeLabel.textContent = `Translator buffer ${translatorImmediateBufferMs} ms`;
+    }
+  } else if (activeRoom === "dedicated") {
+    if (activeDedicatedView === "email") {
+      startButton.textContent = "Email demo uses text";
+      startButton.disabled = true;
+      if (!sessionStarted) {
+        stopButton.disabled = true;
+        audioModeLabel.textContent = "Text-only email demo";
+      }
+    } else {
+      startButton.textContent = dedicatedDemo ? "Start voice demo" : "Open a demo first";
+      if (!sessionStarted && !pendingSessionStart) {
+        startButton.disabled = !dedicatedDemo;
+        audioModeLabel.textContent = dedicatedDemo
+          ? "Dedicated voice idle"
+          : "Dedicated demo locked";
+      }
     }
   } else if (activeEventRole === "speaker") {
     startButton.textContent = "Host event";
@@ -1435,8 +1746,22 @@ function setControlsDisabled(disabled) {
     eventTargetLanguageSelect,
     eventTtsEngineSelect,
     eventCodeInput,
+    dedicatedCodeInput,
+    dedicatedAccessButton,
+    dedicatedChangeButton,
+    dedicatedVoiceTab,
+    dedicatedEmailTab,
+    dedicatedLanguageSelect,
+    dedicatedTtsEngineSelect,
+    dedicatedEmailScenarioSelect,
+    dedicatedEmailResetButton,
+    dedicatedEmailInput,
+    dedicatedEmailSendButton,
   ]) {
     control.disabled = disabled;
+  }
+  if (!disabled) {
+    setDedicatedEmailBusy(dedicatedEmailBusy);
   }
 }
 
@@ -1452,9 +1777,13 @@ function selectedMode() {
 }
 
 function selectedLanguage() {
-  return activeRoom === "translator"
-    ? translatorTargetLanguageSelect.value
-    : languageSelect.value;
+  if (activeRoom === "translator") {
+    return translatorTargetLanguageSelect.value;
+  }
+  if (activeRoom === "dedicated") {
+    return dedicatedLanguageSelect.value;
+  }
+  return languageSelect.value;
 }
 
 function selectedEngine() {
@@ -1463,6 +1792,9 @@ function selectedEngine() {
   }
   if (activeRoom === "event") {
     return eventTtsEngineSelect.value;
+  }
+  if (activeRoom === "dedicated") {
+    return dedicatedTtsEngineSelect.value;
   }
   return ttsEngineSelect.value;
 }
@@ -1480,6 +1812,26 @@ function updateSessionLabel(message = {}) {
         ? `Event ${code} · Listening in ${LANGUAGE_LABELS[language] || language}`
         : "Event listener setup";
     }
+    return;
+  }
+
+  if (activeRoom === "dedicated") {
+    if (!dedicatedDemo) {
+      sessionLabel.textContent = "Enter dedicated demo code";
+      return;
+    }
+    if (activeDedicatedView === "email") {
+      const scenario = selectedDedicatedScenario();
+      sessionLabel.textContent = `${dedicatedDemo.name} · ${
+        scenario ? scenario.label : "Email Desk"
+      }`;
+      return;
+    }
+    const language = message.language || selectedLanguage();
+    const label = LANGUAGE_LABELS[language] || language;
+    sessionLabel.textContent = sessionShortId
+      ? `Session ${sessionShortId} · ${dedicatedDemo.name} · ${label}`
+      : `${dedicatedDemo.name} · Voice Secretary · ${label}`;
     return;
   }
 
@@ -1692,4 +2044,11 @@ function normalizeEventCode(value) {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .slice(0, 12);
+}
+
+function normalizeDemoCode(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 40);
 }

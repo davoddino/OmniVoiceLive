@@ -139,7 +139,7 @@ p {
 
 .roomSwitcher {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 18px;
 }
@@ -196,6 +196,14 @@ p {
 
 .eventGrid {
   grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.dedicatedAccessGrid {
+  grid-template-columns: minmax(190px, 1fr) auto minmax(160px, 0.8fr);
+}
+
+.dedicatedVoiceGrid {
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 1fr);
 }
 
 .field {
@@ -259,6 +267,137 @@ p {
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
+}
+
+.dedicatedGate {
+  display: grid;
+  gap: 14px;
+}
+
+.dedicatedIntro strong {
+  display: block;
+  font-size: 18px;
+}
+
+.dedicatedHeader,
+.emailToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.dedicatedHeader strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.dedicatedView {
+  display: none;
+}
+
+.dedicatedView.active {
+  display: block;
+}
+
+.inlineStatus {
+  align-self: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.emailToolbar .field {
+  flex: 1;
+}
+
+.emailDemoGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(360px, 1.15fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.emailPromptPane textarea {
+  min-height: 430px;
+}
+
+.emailThreadPane {
+  display: grid;
+  grid-template-rows: minmax(260px, 1fr) auto;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-soft);
+}
+
+.emailThread {
+  overflow: auto;
+  padding: 14px;
+}
+
+.emailMessage {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.emailMessage.assistant {
+  border-left: 4px solid var(--blue);
+}
+
+.emailMessage.user {
+  border-left: 4px solid var(--green);
+}
+
+.emailMessage.system {
+  color: var(--muted);
+  background: #eef3f8;
+}
+
+.emailMessageHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.emailMessageBody {
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.emailComposer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  background: #fff;
+}
+
+.emailComposer textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 11px;
+  line-height: 1.4;
+}
+
+.emailComposer button {
+  align-self: end;
 }
 
 .segmented {
@@ -547,6 +686,9 @@ p {
   .assistantGrid,
   .translatorGrid,
   .eventGrid,
+  .dedicatedAccessGrid,
+  .dedicatedVoiceGrid,
+  .emailDemoGrid,
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -558,6 +700,14 @@ p {
   .eventHeader {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .dedicatedHeader,
+  .emailToolbar,
+  .emailComposer {
+    align-items: stretch;
+    flex-direction: column;
+    display: flex;
   }
 
   .segmented,
@@ -579,5 +729,10 @@ p {
   .conversation {
     min-height: 56vh;
     max-height: none;
+  }
+
+  .emailPromptPane textarea,
+  .emailThreadPane {
+    min-height: 360px;
   }
 }
