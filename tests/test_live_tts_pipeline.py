@@ -285,7 +285,7 @@ class LiveTTSPipelineTests(unittest.TestCase):
         )
 
         self.assertNotIn("voice_clone_prompt", fake_model.kwargs)
-        self.assertIn("Romanian", fake_model.kwargs["instruct"])
+        self.assertEqual(fake_model.kwargs["instruct"], config.tts_instruct)
         self.assertEqual(fake_model.kwargs["language"], "ro")
 
     def test_omnivoice_tts_uses_model_compatible_language_names(self) -> None:

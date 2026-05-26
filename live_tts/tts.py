@@ -24,7 +24,6 @@ from live_tts.audio import (
 )
 from live_tts.config import LiveTTSConfig
 from live_tts.languages import (
-    language_english_name,
     normalize_language_code,
     omnivoice_tts_language,
 )
@@ -347,14 +346,7 @@ class OmniVoiceTTS(BaseTTS):
             if voice_config.instruct and (
                 not using_fixed_reference or self.config.tts_fixed_reference_instruct
             ):
-                kwargs["instruct"] = (
-                    voice_config.instruct
-                    if using_fixed_reference
-                    else self._language_aware_instruct(
-                        voice_config.instruct,
-                        requested_language,
-                    )
-                )
+                kwargs["instruct"] = voice_config.instruct
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt
 
@@ -521,19 +513,6 @@ class OmniVoiceTTS(BaseTTS):
         if not state.anchor_language:
             return True
         return self._language_matches_anchor(requested_language, state.anchor_language)
-
-    def _language_aware_instruct(self, base_instruct: str, language: str) -> str:
-        language_name = language_english_name(language)
-        language_hint = (
-            f"Speak in {language_name} with natural native pronunciation and accent."
-        )
-        instruct = base_instruct.strip()
-        if not instruct:
-            return language_hint
-        lower = instruct.lower()
-        if "native pronunciation" in lower or "native accent" in lower:
-            return instruct
-        return f"{instruct}. {language_hint}"
 
 
 class Qwen3TTS(BaseTTS):
