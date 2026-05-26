@@ -4,6 +4,7 @@ import asyncio
 import base64
 import gc
 import io
+import json
 import logging
 import random
 import os
@@ -40,6 +41,13 @@ class TTSTurnState:
     anchor_duration_s: float = 0.0
     anchor_source: str = ""
     anchor_language: str = ""
+
+
+@dataclass(frozen=True)
+class LanguageReferenceSpec:
+    language: str
+    audio_path: Path
+    text: str
 
 
 class BaseTTS(ABC):
@@ -91,6 +99,9 @@ class OmniVoiceTTS(BaseTTS):
             config.tts_language,
             default="it",
         )
+        self._language_reference_specs: dict[str, LanguageReferenceSpec] = {}
+        self._language_reference_states: dict[str, TTSTurnState] = {}
+        self._language_reference_specs_loaded = False
 
     async def start(self) -> None:
         voice_mode = self._voice_mode()
@@ -104,6 +115,9 @@ class OmniVoiceTTS(BaseTTS):
         await asyncio.to_thread(self._load_model)
         if voice_mode == "fixed_reference":
             await asyncio.to_thread(self._load_fixed_reference_voice_prompt)
+            await asyncio.to_thread(self._load_language_reference_specs)
+            if self.config.tts_language_reference_preload:
+                await asyncio.to_thread(self._preload_language_reference_voice_prompts)
             if self.config.tts_warmup_enabled:
                 logger.info(
                     "omnivoice fixed reference warmup text=%r",
@@ -163,6 +177,9 @@ class OmniVoiceTTS(BaseTTS):
         self._startup_anchor_duration_s = 0.0
         self._fixed_reference_duration_s = 0.0
         self._startup_anchor_language = ""
+        self._language_reference_specs = {}
+        self._language_reference_states = {}
+        self._language_reference_specs_loaded = False
         await asyncio.to_thread(_release_torch_memory)
 
     def create_turn_state(self, language: str | None = None) -> TTSTurnState:
@@ -175,6 +192,9 @@ class OmniVoiceTTS(BaseTTS):
                 requested_language,
                 self._fixed_reference_language,
             ):
+                state = self._language_reference_state(requested_language)
+                if state is not None:
+                    return state
                 logger.info(
                     "omnivoice fixed reference skipped for language=%s reference_language=%s",
                     requested_language,
@@ -284,6 +304,107 @@ class OmniVoiceTTS(BaseTTS):
             len(ref_text),
             self._fixed_reference_language,
         )
+
+    def _load_language_reference_specs(self) -> None:
+        if self._language_reference_specs_loaded:
+            return
+
+        directory = _resolve_path(self.config.tts_language_reference_dir)
+        manifest_path = directory / "manifest.json"
+        if not manifest_path.is_file():
+            self._language_reference_specs_loaded = True
+            logger.info(
+                "omnivoice language references disabled; manifest not found path=%s",
+                manifest_path,
+            )
+            return
+
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw_references = raw.get("references", raw)
+        specs: dict[str, LanguageReferenceSpec] = {}
+        for raw_language, raw_entry in raw_references.items():
+            if not isinstance(raw_entry, dict):
+                continue
+            language = self._normalize_voice_language(
+                raw_entry.get("language") or raw_language
+            )
+            audio_value = str(raw_entry.get("audio") or raw_entry.get("audio_path") or "")
+            text = str(raw_entry.get("text") or "").strip()
+            if not audio_value or not text:
+                continue
+            audio_path = Path(audio_value)
+            if not audio_path.is_absolute():
+                audio_path = directory / audio_path
+            if not audio_path.is_file():
+                logger.warning(
+                    "omnivoice language reference missing audio language=%s path=%s",
+                    language,
+                    audio_path,
+                )
+                continue
+            specs[language] = LanguageReferenceSpec(
+                language=language,
+                audio_path=audio_path,
+                text=text,
+            )
+
+        self._language_reference_specs = specs
+        self._language_reference_specs_loaded = True
+        logger.info(
+            "omnivoice language references loaded count=%s languages=%s",
+            len(specs),
+            ",".join(sorted(specs)),
+        )
+
+    def _preload_language_reference_voice_prompts(self) -> None:
+        self._load_language_reference_specs()
+        for language in sorted(self._language_reference_specs):
+            self._language_reference_state(language)
+
+    def _language_reference_state(self, language: str) -> TTSTurnState | None:
+        if self.model is None:
+            self._load_model()
+        assert self.model is not None
+        self._load_language_reference_specs()
+
+        normalized = self._normalize_voice_language(language)
+        if normalized in self._language_reference_states:
+            return self._language_reference_states[normalized]
+
+        spec = self._language_reference_specs.get(normalized)
+        if spec is None:
+            return None
+
+        with self._lock:
+            if normalized in self._language_reference_states:
+                return self._language_reference_states[normalized]
+            logger.info(
+                "omnivoice language reference loading language=%s audio=%s chars=%s",
+                normalized,
+                spec.audio_path,
+                len(spec.text),
+            )
+            voice_prompt = self.model.create_voice_clone_prompt(
+                ref_audio=str(spec.audio_path),
+                ref_text=spec.text,
+                preprocess_prompt=self.config.tts_reference_preprocess,
+            )
+            self._clear_cuda_cache()
+            state = TTSTurnState(
+                voice_prompt=voice_prompt,
+                anchor_text=spec.text,
+                anchor_duration_s=_audio_duration_seconds(spec.audio_path),
+                anchor_source="language_reference",
+                anchor_language=normalized,
+            )
+            self._language_reference_states[normalized] = state
+        logger.info(
+            "omnivoice language reference ready language=%s duration_s=%.2f chars=%s",
+            normalized,
+            state.anchor_duration_s,
+            len(spec.text),
+        )
+        return state
 
     def _resolve_dtype(self, torch_module):
         value = self.config.tts_dtype.strip().lower()

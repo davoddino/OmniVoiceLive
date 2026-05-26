@@ -288,6 +288,53 @@ class LiveTTSPipelineTests(unittest.TestCase):
         self.assertEqual(fake_model.kwargs["instruct"], config.tts_instruct)
         self.assertEqual(fake_model.kwargs["language"], "ro")
 
+    def test_language_reference_is_used_for_matching_translation_language(self) -> None:
+        class FakeModel:
+            def create_voice_clone_prompt(self, ref_audio, ref_text, preprocess_prompt):
+                self.ref_audio = ref_audio
+                self.ref_text = ref_text
+                self.preprocess_prompt = preprocess_prompt
+                return "ro-prompt"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_path = root / "ro.wav"
+            audio_path.write_bytes(
+                b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00"
+                b"\x01\x00\x01\x00\xc0]\x00\x00\x80\xbb\x00\x00"
+                b"\x02\x00\x10\x00data\x00\x00\x00\x00"
+            )
+            (root / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "references": {
+                            "ro": {
+                                "language": "ro",
+                                "audio": "ro.wav",
+                                "text": "Buna ziua.",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = voice_config_source()
+            config.tts_voice_mode = "fixed_reference"
+            config.tts_language_reference_dir = str(root)
+            fake_model = FakeModel()
+            tts = OmniVoiceTTS(config)
+            tts.model = fake_model
+            tts.sample_rate = 24000
+            tts._fixed_reference_voice_prompt = object()
+            tts._fixed_reference_language = "it"
+
+            state = tts.create_turn_state(language="ro")
+
+        self.assertEqual(state.voice_prompt, "ro-prompt")
+        self.assertEqual(state.anchor_source, "language_reference")
+        self.assertEqual(state.anchor_language, "ro")
+        self.assertEqual(state.anchor_text, "Buna ziua.")
+
     def test_omnivoice_tts_uses_model_compatible_language_names(self) -> None:
         class FakeModel:
             def __init__(self) -> None:
@@ -725,6 +772,9 @@ def voice_config_source() -> SimpleNamespace:
         tts_voice_mode="session_anchor",
         tts_instruct="male, middle-aged, low pitch",
         tts_fixed_reference_instruct=False,
+        tts_reference_preprocess=False,
+        tts_language_reference_dir="voice_candidates/language_anchors",
+        tts_language_reference_preload=True,
         tts_language="it",
         tts_postprocess_output=False,
         tts_denoise=True,

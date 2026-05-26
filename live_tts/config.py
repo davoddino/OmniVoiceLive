@@ -185,6 +185,8 @@ class LiveTTSConfig:
     tts_reference_text: str
     tts_reference_preprocess: bool
     tts_fixed_reference_instruct: bool
+    tts_language_reference_dir: str
+    tts_language_reference_preload: bool
 
     qwen_tts_model: str
     qwen_tts_mode: str
@@ -335,6 +337,14 @@ class LiveTTSConfig:
             ),
             tts_fixed_reference_instruct=_env_bool(
                 "LIVE_TTS_FIXED_REFERENCE_INSTRUCT", False
+            ),
+            tts_language_reference_dir=_env(
+                "LIVE_TTS_LANGUAGE_REFERENCE_DIR",
+                "voice_candidates/language_anchors",
+            ),
+            tts_language_reference_preload=_env_bool(
+                "LIVE_TTS_LANGUAGE_REFERENCE_PRELOAD",
+                True,
             ),
             qwen_tts_model=_env(
                 "LIVE_TTS_QWEN_MODEL",

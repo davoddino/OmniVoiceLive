@@ -52,7 +52,8 @@ async def startup() -> None:
     logger.info(
         "live_tts startup tts_backend=%s stt_backend=%s llm_backend=%s ssl=%s "
         "live_mode=%s translator_timing=%s translator_buffer_ms=%s "
-        "voice_mode=%s reference_audio=%r reference_preprocess=%s instruct=%r "
+        "voice_mode=%s reference_audio=%r language_reference_dir=%r "
+        "reference_preprocess=%s instruct=%r "
         "num_step=%s/%s speed=%.2f position_temp=%.2f segments=%s-%s/%s-%s "
         "vad_threshold=%.4f vad_adaptive=%s vad_preroll_ms=%s "
         "stt_padding_ms=%s/%s rag_enabled=%s recording_enabled=%s "
@@ -66,6 +67,7 @@ async def startup() -> None:
         config.translator_immediate_buffer_ms,
         config.tts_voice_mode,
         config.tts_reference_audio if config.tts_voice_mode == "fixed_reference" else "",
+        config.tts_language_reference_dir,
         config.tts_reference_preprocess,
         config.tts_instruct,
         config.tts_num_step_first,
@@ -168,6 +170,8 @@ async def health() -> dict[str, object]:
         "tts_voice_mode": config.tts_voice_mode,
         "tts_voice_id": config.tts_voice_id,
         "tts_reference_audio": config.tts_reference_audio,
+        "tts_language_reference_dir": config.tts_language_reference_dir,
+        "tts_language_reference_preload": config.tts_language_reference_preload,
         "tts_reference_preprocess": config.tts_reference_preprocess,
         "tts_instruct": config.tts_instruct,
         "tts_language": config.tts_language,
