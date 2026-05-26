@@ -127,7 +127,7 @@ class RealtimeSession:
             "max_turn_s": config.vad_max_turn_s,
         }
         self.tts_session_state: TTSTurnState | None = (
-            tts.create_turn_state()
+            tts.create_turn_state(language=self.language)
             if config.tts_voice_mode.strip().lower().replace("-", "_")
             in {
                 "fixed_reference",
@@ -340,7 +340,7 @@ class RealtimeSession:
             provider=engine,
             voice_id=engine,
         )
-        self.tts_session_state = self.tts.create_turn_state()
+        self.tts_session_state = self.tts.create_turn_state(language=self.language)
 
     def _tts_engine_status(self) -> dict[str, object]:
         status = getattr(self.tts, "status", None)
@@ -699,7 +699,9 @@ class RealtimeSession:
             first = True
             segment_index = 0
             cancelled_pending = 0
-            tts_state = self.tts_session_state or self.tts.create_turn_state()
+            tts_state = self.tts_session_state or self.tts.create_turn_state(
+                language=self.language
+            )
             crossfader = AudioCrossfader(
                 self.tts.sample_rate,
                 self.voice_config.crossfade_ms,

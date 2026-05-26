@@ -719,7 +719,7 @@ class EventRoom:
             nonlocal first_audio_logged
             first = True
             segment_index = 0
-            tts_state = self.tts.create_turn_state()
+            tts_state = self.tts.create_turn_state(language=target_language)
             voice_config = VoiceSessionConfig.from_config(
                 self.config,
                 self.tts.sample_rate,

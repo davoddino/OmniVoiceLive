@@ -110,6 +110,8 @@ def trim_tts_onset_noise(
     window_ms: int = 8,
     keep_ms: int = 3,
     max_trim_ms: int = 80,
+    sustain_ms: int = 24,
+    min_active_ratio: float = 0.30,
 ) -> np.ndarray:
     mono = ensure_mono_float32(samples)
     if mono.size == 0:
@@ -117,20 +119,41 @@ def trim_tts_onset_noise(
 
     max_trim = min(mono.size, int(sample_rate * max_trim_ms / 1000))
     window = max(1, int(sample_rate * window_ms / 1000))
+    sustain = max(window, int(sample_rate * sustain_ms / 1000))
     keep = max(0, int(sample_rate * keep_ms / 1000))
     if max_trim <= window:
         return mono
 
     start = 0
+    fallback_start: int | None = None
     for idx in range(0, max_trim - window + 1):
         frame = mono[idx : idx + window]
         rms = math.sqrt(float(np.mean(frame * frame)) + 1e-12)
         peak = float(np.max(np.abs(frame)))
+        if fallback_start is None and (rms >= threshold or peak >= threshold * 2.5):
+            fallback_start = max(0, idx - keep)
+
+        sustained_frame = mono[idx : min(mono.size, idx + sustain)]
+        if sustained_frame.size < sustain:
+            continue
+        sustained_rms = math.sqrt(
+            float(np.mean(sustained_frame * sustained_frame)) + 1e-12
+        )
+        tail = sustained_frame[-window:]
+        tail_rms = math.sqrt(float(np.mean(tail * tail)) + 1e-12)
+        active_ratio = float(np.mean(np.abs(sustained_frame) >= threshold * 0.70))
         if rms >= threshold or peak >= threshold * 2.5:
-            start = max(0, idx - keep)
-            break
+            if (
+                sustained_rms >= threshold * 0.80
+                and tail_rms >= threshold * 0.60
+                and active_ratio >= min_active_ratio
+            ):
+                start = max(0, idx - keep)
+                break
     else:
-        return mono
+        if fallback_start is None:
+            return mono
+        start = fallback_start
 
     return mono[start:].astype(np.float32, copy=False)
 

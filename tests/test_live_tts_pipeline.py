@@ -155,6 +155,26 @@ class LiveTTSPipelineTests(unittest.TestCase):
         first_active = int(np.flatnonzero(np.abs(cleaned) > 0.010)[0])
         self.assertLessEqual(first_active, 12)
 
+    def test_tts_onset_noise_trim_ignores_short_start_transient(self) -> None:
+        sample_rate = 1000
+        transient = np.full(6, 0.09, dtype=np.float32)
+        silence = np.zeros(30, dtype=np.float32)
+        speech = np.full(100, 0.08, dtype=np.float32)
+
+        cleaned = trim_tts_onset_noise(
+            np.concatenate([transient, silence, speech]),
+            sample_rate,
+            threshold=0.010,
+            window_ms=8,
+            keep_ms=3,
+            max_trim_ms=80,
+        )
+
+        self.assertLessEqual(len(cleaned), 114)
+        self.assertLess(float(np.max(np.abs(cleaned[:3]))), 0.02)
+        first_active = int(np.flatnonzero(np.abs(cleaned) > 0.010)[0])
+        self.assertLessEqual(first_active, 14)
+
     def test_loudness_smoother_keeps_gain_state_between_chunks(self) -> None:
         smoother = AudioLoudnessSmoother(target_lufs=-20.0, smoothing=0.5)
         quiet = np.full(1000, 0.01, dtype=np.float32)
@@ -184,7 +204,11 @@ class LiveTTSPipelineTests(unittest.TestCase):
         tts.model = fake_model
         tts.sample_rate = 24000
         prompt = object()
-        state = TTSTurnState(voice_prompt=prompt)
+        state = TTSTurnState(
+            voice_prompt=prompt,
+            anchor_source="fixed_reference",
+            anchor_language="it",
+        )
         voice_config = VoiceSessionConfig.from_config(config, 24000, language="it")
 
         tts._synthesize_sync(
@@ -219,12 +243,50 @@ class LiveTTSPipelineTests(unittest.TestCase):
         tts._synthesize_sync(
             "Ciao, ti aiuto subito.",
             True,
-            TTSTurnState(voice_prompt=object()),
+            TTSTurnState(
+                voice_prompt=object(),
+                anchor_source="fixed_reference",
+                anchor_language="it",
+            ),
             "it",
             VoiceSessionConfig.from_config(config, 24000, language="it"),
         )
 
         self.assertNotIn("instruct", fake_model.kwargs)
+
+    def test_fixed_reference_is_skipped_for_different_tts_language(self) -> None:
+        class FakeModel:
+            def __init__(self) -> None:
+                self.kwargs = {}
+
+            def generate(self, **kwargs):
+                self.kwargs = kwargs
+                return [np.full(480, 0.1, dtype=np.float32)]
+
+        config = voice_config_source()
+        config.tts_voice_mode = "fixed_reference"
+        config.tts_fixed_reference_instruct = False
+        config.tts_seed = None
+        fake_model = FakeModel()
+        tts = OmniVoiceTTS(config)
+        tts.model = fake_model
+        tts.sample_rate = 24000
+        tts._fixed_reference_voice_prompt = object()
+        tts._fixed_reference_text = "Ciao, ti aiuto subito."
+        tts._fixed_reference_language = "it"
+        state = tts.create_turn_state(language="ro")
+
+        tts._synthesize_sync(
+            "Buna ziua, va ajut imediat.",
+            True,
+            state,
+            "ro",
+            VoiceSessionConfig.from_config(config, 24000, language="ro"),
+        )
+
+        self.assertNotIn("voice_clone_prompt", fake_model.kwargs)
+        self.assertIn("Romanian", fake_model.kwargs["instruct"])
+        self.assertEqual(fake_model.kwargs["language"], "ro")
 
     def test_omnivoice_tts_uses_model_compatible_language_names(self) -> None:
         class FakeModel:
@@ -605,7 +667,7 @@ class FakeEventTTS:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def create_turn_state(self) -> TTSTurnState:
+    def create_turn_state(self, language=None) -> TTSTurnState:
         return TTSTurnState()
 
     async def synthesize(

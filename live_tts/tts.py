@@ -23,7 +23,11 @@ from live_tts.audio import (
     trim_tts_onset_noise,
 )
 from live_tts.config import LiveTTSConfig
-from live_tts.languages import omnivoice_tts_language
+from live_tts.languages import (
+    language_english_name,
+    normalize_language_code,
+    omnivoice_tts_language,
+)
 from live_tts.voice import VoiceSessionConfig
 
 
@@ -36,6 +40,7 @@ class TTSTurnState:
     anchor_text: str = ""
     anchor_duration_s: float = 0.0
     anchor_source: str = ""
+    anchor_language: str = ""
 
 
 class BaseTTS(ABC):
@@ -47,7 +52,7 @@ class BaseTTS(ABC):
     async def close(self) -> None:
         return None
 
-    def create_turn_state(self) -> TTSTurnState:
+    def create_turn_state(self, language: str | None = None) -> TTSTurnState:
         return TTSTurnState()
 
     @abstractmethod
@@ -79,9 +84,14 @@ class OmniVoiceTTS(BaseTTS):
         self._startup_voice_prompt: Any | None = None
         self._startup_anchor_text = ""
         self._startup_anchor_duration_s = 0.0
+        self._startup_anchor_language = ""
         self._fixed_reference_voice_prompt: Any | None = None
         self._fixed_reference_text = ""
         self._fixed_reference_duration_s = 0.0
+        self._fixed_reference_language = normalize_language_code(
+            config.tts_language,
+            default="it",
+        )
 
     async def start(self) -> None:
         voice_mode = self._voice_mode()
@@ -129,6 +139,7 @@ class OmniVoiceTTS(BaseTTS):
                     self._startup_voice_prompt = anchor_state.voice_prompt
                     self._startup_anchor_text = anchor_state.anchor_text
                     self._startup_anchor_duration_s = anchor_state.anchor_duration_s
+                    self._startup_anchor_language = anchor_state.anchor_language
                     logger.info(
                         "omnivoice startup voice anchor ready duration_s=%.2f chars=%s",
                         self._startup_anchor_duration_s,
@@ -152,28 +163,50 @@ class OmniVoiceTTS(BaseTTS):
         self._fixed_reference_text = ""
         self._startup_anchor_duration_s = 0.0
         self._fixed_reference_duration_s = 0.0
+        self._startup_anchor_language = ""
         await asyncio.to_thread(_release_torch_memory)
 
-    def create_turn_state(self) -> TTSTurnState:
+    def create_turn_state(self, language: str | None = None) -> TTSTurnState:
+        requested_language = self._normalize_voice_language(language)
         if (
             self._voice_mode() == "fixed_reference"
             and self._fixed_reference_voice_prompt is not None
         ):
+            if not self._language_matches_anchor(
+                requested_language,
+                self._fixed_reference_language,
+            ):
+                logger.info(
+                    "omnivoice fixed reference skipped for language=%s reference_language=%s",
+                    requested_language,
+                    self._fixed_reference_language,
+                )
+                return TTSTurnState()
             return TTSTurnState(
                 voice_prompt=self._fixed_reference_voice_prompt,
                 anchor_text=self._fixed_reference_text,
                 anchor_duration_s=self._fixed_reference_duration_s,
                 anchor_source="fixed_reference",
+                anchor_language=self._fixed_reference_language,
             )
         if (
             self._voice_mode() == "session_anchor"
             and self._startup_voice_prompt is not None
         ):
+            startup_language = self._startup_anchor_language or self._fixed_reference_language
+            if not self._language_matches_anchor(requested_language, startup_language):
+                logger.info(
+                    "omnivoice startup anchor skipped for language=%s anchor_language=%s",
+                    requested_language,
+                    startup_language,
+                )
+                return TTSTurnState()
             return TTSTurnState(
                 voice_prompt=self._startup_voice_prompt,
                 anchor_text=self._startup_anchor_text,
                 anchor_duration_s=self._startup_anchor_duration_s,
                 anchor_source="startup",
+                anchor_language=startup_language,
             )
         return TTSTurnState()
 
@@ -243,10 +276,14 @@ class OmniVoiceTTS(BaseTTS):
         self._clear_cuda_cache()
         self._fixed_reference_text = ref_text
         self._fixed_reference_duration_s = _audio_duration_seconds(ref_audio_path)
+        self._fixed_reference_language = self._normalize_voice_language(
+            self.config.tts_language
+        )
         logger.info(
-            "omnivoice fixed reference ready duration_s=%.2f chars=%s",
+            "omnivoice fixed reference ready duration_s=%.2f chars=%s language=%s",
             self._fixed_reference_duration_s,
             len(ref_text),
+            self._fixed_reference_language,
         )
 
     def _resolve_dtype(self, torch_module):
@@ -277,20 +314,25 @@ class OmniVoiceTTS(BaseTTS):
             language=language,
         )
 
-        num_step = (
-            voice_config.num_step_first if first else voice_config.num_step_next
-        )
+        num_step = voice_config.num_step_first if first else voice_config.num_step_next
         voice_mode = self._voice_mode()
+        requested_language = self._normalize_voice_language(
+            language or voice_config.language or self.config.tts_language
+        )
         use_anchor = (
             voice_mode in {"fixed_reference", "turn_anchor", "session_anchor"}
             and state is not None
             and state.voice_prompt is not None
+            and self._state_matches_language(state, requested_language)
+        )
+        using_fixed_reference = (
+            use_anchor
+            and state is not None
+            and state.anchor_source == "fixed_reference"
         )
         with self._lock:
             self._apply_seed(voice_config.seed)
-            model_language = omnivoice_tts_language(
-                language or voice_config.language or self.config.tts_language
-            )
+            model_language = omnivoice_tts_language(requested_language)
             kwargs = {
                 "text": text,
                 "language": model_language,
@@ -303,17 +345,30 @@ class OmniVoiceTTS(BaseTTS):
                 "denoise": self.config.tts_denoise,
             }
             if voice_config.instruct and (
-                voice_mode != "fixed_reference"
-                or self.config.tts_fixed_reference_instruct
+                not using_fixed_reference or self.config.tts_fixed_reference_instruct
             ):
-                kwargs["instruct"] = voice_config.instruct
+                kwargs["instruct"] = (
+                    voice_config.instruct
+                    if using_fixed_reference
+                    else self._language_aware_instruct(
+                        voice_config.instruct,
+                        requested_language,
+                    )
+                )
             if use_anchor:
                 kwargs["voice_clone_prompt"] = state.voice_prompt
 
             audio = self.model.generate(**kwargs)
 
             raw_waveform = np.asarray(audio[0], dtype=np.float32).reshape(-1)
-            self._maybe_create_anchor(state, text, raw_waveform, "generated", voice_mode)
+            self._maybe_create_anchor(
+                state,
+                text,
+                raw_waveform,
+                "generated",
+                voice_mode,
+                requested_language,
+            )
 
         waveform = raw_waveform
         waveform = trim_low_amplitude_edges(waveform, self.sample_rate)
@@ -348,6 +403,7 @@ class OmniVoiceTTS(BaseTTS):
         waveform: np.ndarray,
         source: str,
         voice_mode: str,
+        language: str,
     ) -> None:
         if voice_mode not in {"turn_anchor", "session_anchor"} or state is None:
             return
@@ -382,9 +438,11 @@ class OmniVoiceTTS(BaseTTS):
             state.anchor_text = ref_text
             state.anchor_duration_s = duration_s
             state.anchor_source = source
+            state.anchor_language = language
             logger.info(
-                "omnivoice anchor created source=%s duration_s=%.2f chars=%s",
+                "omnivoice anchor created source=%s language=%s duration_s=%.2f chars=%s",
                 source,
+                language,
                 duration_s,
                 len(ref_text),
             )
@@ -443,6 +501,39 @@ class OmniVoiceTTS(BaseTTS):
         raise ValueError(
             "Unsupported LIVE_TTS_VOICE_MODE. Use voice_design, fixed_reference, turn_anchor, or session_anchor."
         )
+
+    def _normalize_voice_language(self, language: str | None) -> str:
+        return normalize_language_code(
+            language,
+            default=self.config.tts_language or "it",
+        )
+
+    def _language_matches_anchor(self, requested: str, anchor_language: str) -> bool:
+        if not anchor_language:
+            return True
+        return requested == self._normalize_voice_language(anchor_language)
+
+    def _state_matches_language(
+        self,
+        state: TTSTurnState,
+        requested_language: str,
+    ) -> bool:
+        if not state.anchor_language:
+            return True
+        return self._language_matches_anchor(requested_language, state.anchor_language)
+
+    def _language_aware_instruct(self, base_instruct: str, language: str) -> str:
+        language_name = language_english_name(language)
+        language_hint = (
+            f"Speak in {language_name} with natural native pronunciation and accent."
+        )
+        instruct = base_instruct.strip()
+        if not instruct:
+            return language_hint
+        lower = instruct.lower()
+        if "native pronunciation" in lower or "native accent" in lower:
+            return instruct
+        return f"{instruct}. {language_hint}"
 
 
 class Qwen3TTS(BaseTTS):
@@ -674,10 +765,10 @@ class TTSEngineManager(BaseTTS):
             await self._close_active()
             self._status = "unloaded"
 
-    def create_turn_state(self) -> TTSTurnState:
+    def create_turn_state(self, language: str | None = None) -> TTSTurnState:
         if self._active is None:
             return TTSTurnState()
-        return self._active.create_turn_state()
+        return self._active.create_turn_state(language=language)
 
     async def synthesize(
         self,
