@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import threading
+from urllib.parse import urlsplit, urlunsplit
 
 from live_tts.config import LiveTTSConfig
 
@@ -22,10 +23,37 @@ class STTService:
         if cancel_event.is_set():
             return {"text": "", "language": None, "language_probability": 0.0}
 
-        backend = self.config.stt_backend
-        if self.config.stt_url and backend in {"auto", "http"}:
+        backend = self._backend()
+        if self._url() and backend in {"auto", "http"}:
             return await asyncio.to_thread(self._transcribe_http, wav_bytes, language)
         return await asyncio.to_thread(self._transcribe_local, wav_bytes, language)
+
+    async def status(self) -> dict[str, object]:
+        backend = self._backend()
+        url = self._url()
+        if url and backend in {"auto", "http"}:
+            return await asyncio.to_thread(self._http_status, url, self.health_url(url))
+        return {
+            "ok": True,
+            "mode": "local",
+            "backend": backend,
+            "url": "",
+            "health_url": "",
+        }
+
+    @staticmethod
+    def health_url(stt_url: str) -> str:
+        url = stt_url.strip()
+        if not url:
+            return ""
+        parts = urlsplit(url)
+        path = parts.path.rstrip("/")
+        if path.endswith("/health") or path.endswith("/healthz"):
+            return url
+        if path.endswith("/transcribe"):
+            path = path[: -len("/transcribe")]
+        path = f"{path}/healthz" if path else "/healthz"
+        return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
     def _transcribe_http(
         self, wav_bytes: bytes, language: str | None
@@ -34,9 +62,31 @@ class STTService:
 
         files = {"file": ("turn.wav", wav_bytes, "audio/wav")}
         data = {"language": self._requested_language(language)}
-        response = requests.post(self.config.stt_url, files=files, data=data, timeout=60)
+        response = requests.post(self._url(), files=files, data=data, timeout=60)
         response.raise_for_status()
         return response.json()
+
+    def _http_status(self, url: str, health_url: str) -> dict[str, object]:
+        import requests
+
+        status: dict[str, object] = {
+            "ok": False,
+            "mode": "http",
+            "backend": self._backend(),
+            "url": url,
+            "health_url": health_url,
+        }
+        try:
+            response = requests.get(health_url, timeout=2.5)
+        except requests.RequestException as exc:
+            status["error"] = str(exc)
+            return status
+
+        status["status_code"] = response.status_code
+        status["ok"] = response.ok
+        if not response.ok:
+            status["detail"] = response.text[:300]
+        return status
 
     def _transcribe_local(
         self, wav_bytes: bytes, language: str | None
@@ -85,4 +135,12 @@ class STTService:
         requested = str(language or "").strip().lower()
         if requested:
             return requested
-        return str(self.config.stt_language or "it").strip().lower() or "it"
+        fallback_language = getattr(self.config, "stt_language", "it") or "it"
+        return str(fallback_language).strip().lower() or "it"
+
+    def _backend(self) -> str:
+        backend = getattr(self.config, "stt_backend", "auto") or "auto"
+        return str(backend).strip().lower()
+
+    def _url(self) -> str:
+        return str(getattr(self.config, "stt_url", "") or "").strip()

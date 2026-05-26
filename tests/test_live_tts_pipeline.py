@@ -377,6 +377,26 @@ class LiveTTSPipelineTests(unittest.TestCase):
         self.assertEqual(service._requested_language("auto"), "auto")
         self.assertEqual(service._requested_language(None), "it")
 
+    def test_stt_health_url_uses_whisper_healthz_endpoint(self) -> None:
+        self.assertEqual(
+            STTService.health_url("http://192.168.0.20:8011/transcribe"),
+            "http://192.168.0.20:8011/healthz",
+        )
+        self.assertEqual(
+            STTService.health_url("http://192.168.0.20:8011/healthz"),
+            "http://192.168.0.20:8011/healthz",
+        )
+
+    def test_stt_status_does_not_load_local_model_without_http_url(self) -> None:
+        service = STTService(
+            SimpleNamespace(stt_backend="auto", stt_url="", stt_language="it")
+        )
+
+        status = asyncio.run(service.status())
+
+        self.assertTrue(status["ok"])
+        self.assertEqual(status["mode"], "local")
+
 
 class AsyncLiveTTSPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_transcript_jsonl_is_written(self) -> None:

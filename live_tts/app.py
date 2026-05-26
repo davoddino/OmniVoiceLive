@@ -85,6 +85,16 @@ async def startup() -> None:
         config.recording_enabled,
         config.client_barge_threshold,
     )
+    stt_status = await stt_service.status()
+    if stt_status.get("ok"):
+        logger.info(
+            "live_tts stt ready mode=%s url=%s health_url=%s",
+            stt_status.get("mode"),
+            stt_status.get("url"),
+            stt_status.get("health_url"),
+        )
+    else:
+        logger.warning("live_tts stt check failed status=%s", stt_status)
     await tts_service.start()
     logger.info(
         "live_tts ready tts_sample_rate=%s tts_engine=%s",
@@ -152,6 +162,8 @@ async def health() -> dict[str, object]:
         "tts_engine": tts_status(),
         "tts_engines": tts_engines(),
         "stt_backend": config.stt_backend,
+        "stt_url": config.stt_url,
+        "stt_status": await stt_service.status(),
         "llm_backend": config.llm_backend,
         "tts_voice_mode": config.tts_voice_mode,
         "tts_voice_id": config.tts_voice_id,
